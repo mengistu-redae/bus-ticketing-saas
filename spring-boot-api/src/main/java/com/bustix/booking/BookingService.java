@@ -2,6 +2,8 @@ package com.bustix.booking;
 
 import com.bustix.fleet.Route;
 import com.bustix.fleet.RouteRepository;
+import com.bustix.operator.Operator;
+import com.bustix.operator.OperatorRepository;
 import com.bustix.scheduling.Seat;
 import com.bustix.scheduling.SeatRepository;
 import com.bustix.scheduling.Trip;
@@ -33,6 +35,7 @@ public class BookingService {
     private final BookingRepository bookingRepository;
     private final BookingSeatRepository bookingSeatRepository;
     private final BookingWriter bookingWriter;
+    private final OperatorRepository operatorRepository;
 
     public BookingService(
             SeatLockService seatLockService,
@@ -41,7 +44,8 @@ public class BookingService {
             SeatRepository seatRepository,
             BookingRepository bookingRepository,
             BookingSeatRepository bookingSeatRepository,
-            BookingWriter bookingWriter) {
+            BookingWriter bookingWriter,
+            OperatorRepository operatorRepository) {
         this.seatLockService = seatLockService;
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
@@ -49,6 +53,7 @@ public class BookingService {
         this.bookingRepository = bookingRepository;
         this.bookingSeatRepository = bookingSeatRepository;
         this.bookingWriter = bookingWriter;
+        this.operatorRepository = operatorRepository;
     }
 
     /**
@@ -72,6 +77,18 @@ public class BookingService {
 
         if ("counter".equals(channel) && !trip.getTenantId().equals(agentTenantId)) {
             throw new TenantMismatchException("Agent's operator does not match this trip's operator");
+        }
+
+        // Booking-time-only enforcement of operator deactivation (see
+        // PlatformController.deactivate) - deliberately checked here and
+        // nowhere else: marketplace search and staff login are untouched,
+        // only the booking write itself is blocked. Checked before the
+        // idempotency lookup/seat lock so a doomed booking never touches
+        // Redis.
+        Operator operator = operatorRepository.findById(trip.getTenantId())
+                .orElseThrow(() -> new NoSuchElementException("Operator not found: " + trip.getTenantId()));
+        if (!"active".equals(operator.getStatus())) {
+            throw new OperatorInactiveException("This operator is not currently accepting bookings");
         }
 
         // Idempotency check happens before any locking - a retried request

@@ -5,10 +5,13 @@ import StatusPill from '../../components/StatusPill.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
 import ErrorBanner from '../../components/ErrorBanner.jsx';
+import WaybillItemsEditor from '../../components/WaybillItemsEditor.jsx';
 import { formatCurrency, formatDateTime } from '../../lib/format.js';
 
 const inputClass =
   'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
+
+const emptyItem = { description: '', quantity: '1', declaredValue: '', grossWeightKg: '' };
 
 const emptyForm = {
   tripId: '',
@@ -19,9 +22,7 @@ const emptyForm = {
   consigneePhone: '',
   consigneeIdNumber: '',
   description: '',
-  quantity: '1',
-  declaredValue: '',
-  grossWeightKg: '',
+  items: [emptyItem],
 };
 
 /**
@@ -59,8 +60,9 @@ export default function Waybills() {
   async function handleCreate(event) {
     event.preventDefault();
     setFormError(null);
-    if (!form.tripId || !form.consignorName || !form.consignorPhone || !form.consigneeName || !form.consigneePhone || !form.consigneeIdNumber || !form.description || !form.grossWeightKg) {
-      setFormError('Trip, both parties\' name/phone, consignee ID, description, and gross weight are all required.');
+    const itemsValid = form.items.length > 0 && form.items.every((i) => i.description && i.grossWeightKg);
+    if (!form.tripId || !form.consignorName || !form.consignorPhone || !form.consigneeName || !form.consigneePhone || !form.consigneeIdNumber || !itemsValid) {
+      setFormError('Trip, both parties\' name/phone, consignee ID, and every item\'s description/gross weight are all required.');
       return;
     }
     try {
@@ -72,14 +74,17 @@ export default function Waybills() {
         consigneeName: form.consigneeName,
         consigneePhone: form.consigneePhone,
         consigneeIdNumber: form.consigneeIdNumber,
-        description: form.description,
-        quantity: form.quantity ? Number(form.quantity) : undefined,
-        declaredValue: form.declaredValue ? Number(form.declaredValue) : undefined,
-        grossWeightKg: Number(form.grossWeightKg),
+        description: form.description || undefined,
+        items: form.items.map((i) => ({
+          description: i.description,
+          quantity: i.quantity ? Number(i.quantity) : undefined,
+          declaredValue: i.declaredValue ? Number(i.declaredValue) : undefined,
+          grossWeightKg: Number(i.grossWeightKg),
+        })),
       });
       setForm(emptyForm);
     } catch (err) {
-      setFormError(err.message || 'Could not create waybill - check the description isn\'t a prohibited item and a cargo rate is configured for this route.');
+      setFormError(err.message || 'Could not create waybill - check no item\'s description is a prohibited item and a cargo rate is configured for this route.');
     }
   }
 
@@ -126,19 +131,18 @@ export default function Waybills() {
           </fieldset>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-end gap-3">
-          <Field label="Description">
-            <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${inputClass} w-64`} />
+        <div className="mt-4">
+          <Field label="Shipment summary (optional)">
+            <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${inputClass} w-full max-w-md`} placeholder="e.g. 3 boxes of textiles + 1 crate of electronics" />
           </Field>
-          <Field label="Quantity">
-            <input type="number" min="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className={`${inputClass} w-20`} />
-          </Field>
-          <Field label="Declared value (optional)">
-            <input type="number" min="0" step="0.01" value={form.declaredValue} onChange={(e) => setForm({ ...form, declaredValue: e.target.value })} className={`${inputClass} w-32`} />
-          </Field>
-          <Field label="Gross weight (kg)">
-            <input type="number" min="0.01" step="0.01" value={form.grossWeightKg} onChange={(e) => setForm({ ...form, grossWeightKg: e.target.value })} className={`${inputClass} w-28`} />
-          </Field>
+        </div>
+
+        <div className="mt-4">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-muted">Items</span>
+          <WaybillItemsEditor items={form.items} onChange={(items) => setForm({ ...form, items })} />
+        </div>
+
+        <div className="mt-4">
           <button type="submit" disabled={createWaybill.isPending} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-50">
             {createWaybill.isPending ? 'Creating…' : 'Create waybill'}
           </button>
@@ -154,9 +158,10 @@ export default function Waybills() {
 
       {!isLoading && !isError && waybills?.length > 0 && (
         <div className="flex flex-col gap-2">
-          {[...waybills].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((wb) => {
+          {[...waybills].sort((a, b) => new Date(b.waybill.createdAt) - new Date(a.waybill.createdAt)).map(({ waybill: wb, items }) => {
             const trip = tripById[wb.tripId];
             const route = trip ? routeById[trip.routeId] : null;
+            const summary = wb.description || `${items.length} item${items.length === 1 ? '' : 's'}`;
             return (
               <Link
                 key={wb.id}
@@ -171,7 +176,7 @@ export default function Waybills() {
                   <p className="text-sm font-semibold text-ink">
                     {route ? `${route.origin} → ${route.destination}` : 'Unknown route'} · {wb.consignorName} → {wb.consigneeName}
                   </p>
-                  <p className="text-xs text-ink-muted">{wb.description} · {wb.grossWeightKg} kg</p>
+                  <p className="text-xs text-ink-muted">{summary} · {wb.grossWeightKg} kg</p>
                 </div>
                 <span className="font-mono text-sm font-semibold text-ink">{formatCurrency(wb.totalCargoCost)}</span>
               </Link>

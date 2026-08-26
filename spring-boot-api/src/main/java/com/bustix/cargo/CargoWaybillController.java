@@ -33,69 +33,80 @@ public class CargoWaybillController {
 
     private final CargoWaybillService cargoWaybillService;
     private final CargoWaybillRepository cargoWaybillRepository;
+    private final CargoWaybillItemRepository cargoWaybillItemRepository;
     private final CurrentUserService currentUserService;
 
     public CargoWaybillController(
             CargoWaybillService cargoWaybillService,
             CargoWaybillRepository cargoWaybillRepository,
+            CargoWaybillItemRepository cargoWaybillItemRepository,
             CurrentUserService currentUserService) {
         this.cargoWaybillService = cargoWaybillService;
         this.cargoWaybillRepository = cargoWaybillRepository;
+        this.cargoWaybillItemRepository = cargoWaybillItemRepository;
         this.currentUserService = currentUserService;
+    }
+
+    /** CargoWaybill carries no JPA relation to its items - see WaybillWithItems's javadoc. */
+    private WaybillWithItems withItems(CargoWaybill waybill) {
+        return new WaybillWithItems(waybill, cargoWaybillItemRepository.findAllByWaybillId(waybill.getId()));
     }
 
     @PostMapping("/api/cargo/waybills")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
-    public CargoWaybill create(@Valid @RequestBody CreateWaybillRequest request, @AuthenticationPrincipal Jwt jwt) {
+    public WaybillWithItems create(@Valid @RequestBody CreateWaybillRequest request, @AuthenticationPrincipal Jwt jwt) {
         UUID tenantId = TenantContext.require();
         UUID issuedByUserId = currentUserService.resolveInternalUserId(jwt);
-        return cargoWaybillService.create(request, tenantId, issuedByUserId);
+        return withItems(cargoWaybillService.create(request, tenantId, issuedByUserId));
     }
 
     @GetMapping("/api/cargo/waybills")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
-    public List<CargoWaybill> list(
+    public List<WaybillWithItems> list(
             @RequestParam(required = false) UUID tripId,
             @RequestParam(required = false) String status) {
         UUID tenantId = TenantContext.require();
+        List<CargoWaybill> waybills;
         if (tripId != null) {
-            return cargoWaybillRepository.findAllByTenantIdAndTripId(tenantId, tripId);
+            waybills = cargoWaybillRepository.findAllByTenantIdAndTripId(tenantId, tripId);
+        } else if (status != null) {
+            waybills = cargoWaybillRepository.findAllByTenantIdAndStatus(tenantId, status);
+        } else {
+            waybills = cargoWaybillRepository.findAllByTenantId(tenantId);
         }
-        if (status != null) {
-            return cargoWaybillRepository.findAllByTenantIdAndStatus(tenantId, status);
-        }
-        return cargoWaybillRepository.findAllByTenantId(tenantId);
+        return waybills.stream().map(this::withItems).toList();
     }
 
     @GetMapping("/api/cargo/waybills/{waybillId}")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
-    public CargoWaybill get(@PathVariable UUID waybillId) {
-        return cargoWaybillRepository.findByIdAndTenantId(waybillId, TenantContext.require())
+    public WaybillWithItems get(@PathVariable UUID waybillId) {
+        CargoWaybill waybill = cargoWaybillRepository.findByIdAndTenantId(waybillId, TenantContext.require())
                 .orElseThrow(() -> new NoSuchElementException("Waybill not found: " + waybillId));
+        return withItems(waybill);
     }
 
     @PatchMapping("/api/cargo/waybills/{waybillId}")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
-    public CargoWaybill update(@PathVariable UUID waybillId, @Valid @RequestBody UpdateWaybillRequest request) {
-        return cargoWaybillService.update(waybillId, TenantContext.require(), request);
+    public WaybillWithItems update(@PathVariable UUID waybillId, @Valid @RequestBody UpdateWaybillRequest request) {
+        return withItems(cargoWaybillService.update(waybillId, TenantContext.require(), request));
     }
 
     @PostMapping("/api/cargo/waybills/{waybillId}/dispatch")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
-    public CargoWaybill dispatch(@PathVariable UUID waybillId) {
-        return cargoWaybillService.dispatch(waybillId, TenantContext.require());
+    public WaybillWithItems dispatch(@PathVariable UUID waybillId) {
+        return withItems(cargoWaybillService.dispatch(waybillId, TenantContext.require()));
     }
 
     @PostMapping("/api/cargo/waybills/{waybillId}/arrive")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
-    public CargoWaybill arrive(@PathVariable UUID waybillId) {
-        return cargoWaybillService.arrive(waybillId, TenantContext.require());
+    public WaybillWithItems arrive(@PathVariable UUID waybillId) {
+        return withItems(cargoWaybillService.arrive(waybillId, TenantContext.require()));
     }
 
     @PostMapping("/api/cargo/waybills/{waybillId}/collect")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
-    public CargoWaybill collect(@PathVariable UUID waybillId, @Valid @RequestBody CollectWaybillRequest request) {
-        return cargoWaybillService.collect(waybillId, TenantContext.require(), request.presentedIdNumber());
+    public WaybillWithItems collect(@PathVariable UUID waybillId, @Valid @RequestBody CollectWaybillRequest request) {
+        return withItems(cargoWaybillService.collect(waybillId, TenantContext.require(), request.presentedIdNumber()));
     }
 
     @PostMapping("/api/cargo/waybills/{waybillId}/cancel")
@@ -130,17 +141,20 @@ public class CargoWaybillController {
 
     @GetMapping("/api/my-shipments")
     @PreAuthorize("hasRole('CUSTOMER')")
-    public List<CargoWaybill> myShipments(@AuthenticationPrincipal Jwt jwt) {
+    public List<WaybillWithItems> myShipments(@AuthenticationPrincipal Jwt jwt) {
         UUID customerUserId = currentUserService.resolveInternalUserId(jwt);
-        return cargoWaybillRepository.findAllByBookingCustomerUserId(customerUserId);
+        return cargoWaybillRepository.findAllByBookingCustomerUserId(customerUserId).stream()
+                .map(this::withItems)
+                .toList();
     }
 
     @GetMapping("/api/my-shipments/{waybillId}")
     @PreAuthorize("hasRole('CUSTOMER')")
-    public CargoWaybill myShipment(@PathVariable UUID waybillId, @AuthenticationPrincipal Jwt jwt) {
+    public WaybillWithItems myShipment(@PathVariable UUID waybillId, @AuthenticationPrincipal Jwt jwt) {
         UUID customerUserId = currentUserService.resolveInternalUserId(jwt);
-        return cargoWaybillRepository.findByIdAndBookingCustomerUserId(waybillId, customerUserId)
+        CargoWaybill waybill = cargoWaybillRepository.findByIdAndBookingCustomerUserId(waybillId, customerUserId)
                 .orElseThrow(() -> new NoSuchElementException("Waybill not found: " + waybillId));
+        return withItems(waybill);
     }
 
     @ExceptionHandler(ProhibitedItemException.class)
@@ -152,6 +166,12 @@ public class CargoWaybillController {
     @ExceptionHandler(NoCargoRateConfiguredException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public String handleNoRateConfigured(NoCargoRateConfiguredException e) {
+        return e.getMessage();
+    }
+
+    @ExceptionHandler(InvalidWaybillItemsException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public String handleInvalidItems(InvalidWaybillItemsException e) {
         return e.getMessage();
     }
 

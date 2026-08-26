@@ -4,16 +4,19 @@ import {
   useArriveWaybill,
   useCancelWaybill,
   useCollectWaybill,
+  useCreateWaybillPayment,
   useDispatchWaybill,
   useFleetRoutes,
   useFleetTrips,
   useUpdateWaybill,
   useWaybill,
+  useWaybillPayments,
 } from '../../api/queries.js';
 import { ApiError } from '../../api/client.js';
 import StatusPill from '../../components/StatusPill.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import ErrorBanner from '../../components/ErrorBanner.jsx';
+import WaybillItemsEditor from '../../components/WaybillItemsEditor.jsx';
 import { formatCurrency, formatDateTime } from '../../lib/format.js';
 
 const inputClass =
@@ -33,7 +36,9 @@ export default function WaybillDetail() {
 
   const stateWaybill = location.state?.waybill;
   const waybillQuery = useWaybill(waybillId);
-  const waybill = waybillQuery.data || stateWaybill;
+  const resolved = waybillQuery.data || stateWaybill;
+  const waybill = resolved?.waybill;
+  const items = resolved?.items || [];
 
   const { data: trips } = useFleetTrips();
   const { data: routes } = useFleetRoutes();
@@ -45,12 +50,18 @@ export default function WaybillDetail() {
   const collectWaybill = useCollectWaybill(waybillId);
   const cancelWaybill = useCancelWaybill(waybillId);
   const updateWaybill = useUpdateWaybill(waybillId);
+  const paymentsQuery = useWaybillPayments(waybillId);
+  const createPayment = useCreateWaybillPayment(waybillId);
 
   const [actionError, setActionError] = useState(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [presentedId, setPresentedId] = useState('');
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentTxnId, setPaymentTxnId] = useState('');
+  const [paymentError, setPaymentError] = useState(null);
 
   async function handleDispatch() {
     setActionError(null);
@@ -95,6 +106,23 @@ export default function WaybillDetail() {
     }
   }
 
+  async function handleRecordPayment(event) {
+    event.preventDefault();
+    setPaymentError(null);
+    const amount = Number(paymentAmount);
+    if (!paymentAmount || Number.isNaN(amount) || amount < 0) {
+      setPaymentError('Enter a valid amount.');
+      return;
+    }
+    try {
+      await createPayment.mutateAsync({ method: paymentMethod, amount, transactionId: paymentTxnId.trim() || undefined });
+      setPaymentAmount('');
+      setPaymentTxnId('');
+    } catch (err) {
+      setPaymentError(err.message || 'Could not record this payment. Please try again.');
+    }
+  }
+
   function startEdit() {
     setActionError(null);
     setEditForm({
@@ -104,10 +132,13 @@ export default function WaybillDetail() {
       consigneeName: waybill.consigneeName,
       consigneePhone: waybill.consigneePhone,
       consigneeIdNumber: waybill.consigneeIdNumber,
-      description: waybill.description,
-      quantity: String(waybill.quantity),
-      declaredValue: waybill.declaredValue != null ? String(waybill.declaredValue) : '',
-      grossWeightKg: String(waybill.grossWeightKg),
+      description: waybill.description || '',
+      items: items.map((i) => ({
+        description: i.description,
+        quantity: String(i.quantity),
+        declaredValue: i.declaredValue != null ? String(i.declaredValue) : '',
+        grossWeightKg: String(i.grossWeightKg),
+      })),
     });
     setEditing(true);
   }
@@ -117,9 +148,13 @@ export default function WaybillDetail() {
     try {
       await updateWaybill.mutateAsync({
         ...editForm,
-        quantity: Number(editForm.quantity),
-        declaredValue: editForm.declaredValue ? Number(editForm.declaredValue) : undefined,
-        grossWeightKg: Number(editForm.grossWeightKg),
+        description: editForm.description || undefined,
+        items: editForm.items.map((i) => ({
+          description: i.description,
+          quantity: i.quantity ? Number(i.quantity) : undefined,
+          declaredValue: i.declaredValue ? Number(i.declaredValue) : undefined,
+          grossWeightKg: Number(i.grossWeightKg),
+        })),
       });
       setEditing(false);
     } catch (err) {
@@ -136,10 +171,10 @@ export default function WaybillDetail() {
     }
   }
 
-  if (waybillQuery.isLoading && !stateWaybill) {
+  if (waybillQuery.isLoading && !resolved) {
     return <Skeleton className="h-48 w-full max-w-xl" />;
   }
-  if (waybillQuery.isError && !stateWaybill) {
+  if (waybillQuery.isError && !resolved) {
     return <ErrorBanner message={waybillQuery.error?.message} onRetry={waybillQuery.refetch} />;
   }
   if (!waybill) {
@@ -148,6 +183,9 @@ export default function WaybillDetail() {
 
   const status = waybill.status;
   const refundAmount = cancelWaybill.data?.refundAmount;
+  const payments = paymentsQuery.data || [];
+  const collected = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  const balanceDue = Number(waybill.totalCargoCost) - collected;
 
   return (
     <div className="max-w-2xl">
@@ -191,11 +229,14 @@ export default function WaybillDetail() {
                 </div>
               </fieldset>
             </div>
-            <div className="mt-4 flex flex-wrap items-end gap-3">
-              <Field label="Description"><input value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} className={`${inputClass} w-64`} /></Field>
-              <Field label="Quantity"><input type="number" min="1" value={editForm.quantity} onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })} className={`${inputClass} w-20`} /></Field>
-              <Field label="Declared value"><input type="number" min="0" step="0.01" value={editForm.declaredValue} onChange={(e) => setEditForm({ ...editForm, declaredValue: e.target.value })} className={`${inputClass} w-32`} /></Field>
-              <Field label="Gross weight (kg)"><input type="number" min="0.01" step="0.01" value={editForm.grossWeightKg} onChange={(e) => setEditForm({ ...editForm, grossWeightKg: e.target.value })} className={`${inputClass} w-28`} /></Field>
+            <div className="mt-4">
+              <Field label="Shipment summary (optional)"><input value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} className={`${inputClass} w-full max-w-md`} /></Field>
+            </div>
+            <div className="mt-4">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-muted">Items</span>
+              <WaybillItemsEditor items={editForm.items} onChange={(items) => setEditForm({ ...editForm, items })} />
+            </div>
+            <div className="mt-4 flex items-center gap-3">
               <button type="button" onClick={saveEdit} disabled={updateWaybill.isPending} className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-50">
                 {updateWaybill.isPending ? 'Saving…' : 'Save'}
               </button>
@@ -219,10 +260,6 @@ export default function WaybillDetail() {
                     <span className="ml-1 text-xs text-success">(ID verified)</span>
                   )}
                 </dd>
-              </div>
-              <div>
-                <dt className="text-ink-muted">Description</dt>
-                <dd className="text-ink">{waybill.description} · qty {waybill.quantity}</dd>
               </div>
               <div>
                 <dt className="text-ink-muted">Weight</dt>
@@ -262,6 +299,33 @@ export default function WaybillDetail() {
               )}
             </dl>
 
+            {waybill.description && (
+              <p className="mt-3 text-sm text-ink-muted">{waybill.description}</p>
+            )}
+
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-ink-muted">
+                    <th className="pb-1 pr-3 font-semibold">Item</th>
+                    <th className="pb-1 pr-3 font-semibold">Qty</th>
+                    <th className="pb-1 pr-3 font-semibold">Weight</th>
+                    <th className="pb-1 font-semibold">Declared value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item) => (
+                    <tr key={item.id} className="border-t border-slate-100">
+                      <td className="py-1 pr-3 text-ink">{item.description}</td>
+                      <td className="py-1 pr-3 text-ink">{item.quantity}</td>
+                      <td className="py-1 pr-3 text-ink">{item.grossWeightKg} kg</td>
+                      <td className="py-1 text-ink">{item.declaredValue != null ? formatCurrency(item.declaredValue) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
             {status === 'issued' && (
               <button type="button" onClick={startEdit} className="mt-4 text-sm text-brand hover:underline">
                 Edit shipment details
@@ -290,6 +354,77 @@ export default function WaybillDetail() {
           </select>
         </div>
       </div>
+
+      {status !== 'cancelled' && (
+        <div className="mt-5 rounded-xl border border-slate-200 bg-surface p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-ink">Payments</h2>
+            <span className="text-sm text-ink-muted">
+              Collected {formatCurrency(collected)} of {formatCurrency(waybill.totalCargoCost)}
+              {balanceDue > 0 && <span className="text-warning"> · {formatCurrency(balanceDue)} due</span>}
+            </span>
+          </div>
+
+          {payments.length > 0 && (
+            <ul className="mb-4 flex flex-col gap-1.5 text-sm">
+              {payments.map((p) => (
+                <li key={p.id} className="flex items-center justify-between text-ink">
+                  <span className="capitalize">
+                    {p.method}
+                    {p.transactionId && <span className="font-mono text-xs text-ink-muted"> ({p.transactionId})</span>}
+                  </span>
+                  <span className="font-mono">{formatCurrency(p.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form onSubmit={handleRecordPayment} className="flex flex-wrap items-end gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-muted">Method</span>
+              <select
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+              >
+                <option value="cash">Cash</option>
+                <option value="telebirr">Telebirr</option>
+                <option value="cbe_birr">CBE Birr</option>
+                <option value="card">Card</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-muted">Amount</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+              />
+            </label>
+            {paymentMethod !== 'cash' && (
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-muted">Txn ID (optional)</span>
+                <input
+                  value={paymentTxnId}
+                  onChange={(e) => setPaymentTxnId(e.target.value)}
+                  className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+                />
+              </label>
+            )}
+            <button
+              type="submit"
+              disabled={createPayment.isPending}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {createPayment.isPending ? 'Recording…' : 'Record payment'}
+            </button>
+          </form>
+          {paymentError && <div className="mt-3"><ErrorBanner message={paymentError} /></div>}
+        </div>
+      )}
 
       {actionError && (
         <div className="mt-4">

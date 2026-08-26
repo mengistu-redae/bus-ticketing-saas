@@ -1,10 +1,9 @@
 package com.bustix.cargo;
 
-import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Min;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 
-import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * Partial update (CargoWaybillController.update) - only non-null fields are
@@ -15,6 +14,15 @@ import java.math.BigDecimal;
  * a caller tries to change one of those after dispatch (decision 11 in
  * my-notes/cargo_logistics_scope_v1.md), rather than silently ignoring it
  * the way an unset field is.
+ *
+ * `items`, when non-null, replaces the *entire* item set (delete-all-then-
+ * reinsert) - there's no per-item patch semantics, matching "physical
+ * fields are frozen unless issued; re-declare the whole shipment before
+ * dispatch if something was wrong." Deliberately not @NotEmpty here (unlike
+ * CreateWaybillRequest.items) - null means "leave items alone" for this
+ * PATCH, so the annotation can't distinguish "omitted" from "must be
+ * non-empty"; CargoWaybillService.update rejects an explicitly-empty list
+ * itself (InvalidWaybillItemsException, 400).
  */
 public record UpdateWaybillRequest(
     String consignorName,
@@ -27,10 +35,9 @@ public record UpdateWaybillRequest(
     String consigneePhone,
     String consigneeIdNumber,
 
+    /** Optional shipment-level summary. */
     String description,
-    @Min(1) Integer quantity,
-    @DecimalMin(value = "0.0", message = "declaredValue must not be negative") BigDecimal declaredValue,
-    @DecimalMin(value = "0.01", message = "grossWeightKg must be positive") BigDecimal grossWeightKg,
+    @Valid List<CreateWaybillRequest.ItemRequest> items,
 
     @Pattern(regexp = "^(unpaid|paid|collect_on_delivery)$", message = "paymentStatus must be one of: unpaid, paid, collect_on_delivery")
     String paymentStatus

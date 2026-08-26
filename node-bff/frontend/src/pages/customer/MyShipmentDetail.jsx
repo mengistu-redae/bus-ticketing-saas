@@ -17,7 +17,8 @@ import { formatCurrency, formatDateTime } from '../../lib/format.js';
 export default function MyShipmentDetail() {
   const { waybillId } = useParams();
   const waybillQuery = useMyShipment(waybillId);
-  const waybill = waybillQuery.data;
+  const waybill = waybillQuery.data?.waybill;
+  const items = waybillQuery.data?.items || [];
   const tripQuery = useTrip(waybill?.tripId);
   const trip = tripQuery.data;
 
@@ -63,10 +64,6 @@ export default function MyShipmentDetail() {
             <dd className="text-ink">{waybill.consigneeName} · {waybill.consigneePhone}</dd>
           </div>
           <div>
-            <dt className="text-ink-muted">Description</dt>
-            <dd className="text-ink">{waybill.description} · qty {waybill.quantity}</dd>
-          </div>
-          <div>
             <dt className="text-ink-muted">Weight</dt>
             <dd className="text-ink">{waybill.grossWeightKg} kg</dd>
           </div>
@@ -101,6 +98,31 @@ export default function MyShipmentDetail() {
             </div>
           )}
         </dl>
+
+        {waybill.description && (
+          <p className="mt-3 text-sm text-ink-muted">{waybill.description}</p>
+        )}
+
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-ink-muted">
+                <th className="pb-1 pr-3 font-semibold">Item</th>
+                <th className="pb-1 pr-3 font-semibold">Qty</th>
+                <th className="pb-1 font-semibold">Weight</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id} className="border-t border-slate-100">
+                  <td className="py-1 pr-3 text-ink">{item.description}</td>
+                  <td className="py-1 pr-3 text-ink">{item.quantity}</td>
+                  <td className="py-1 text-ink">{item.grossWeightKg} kg</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

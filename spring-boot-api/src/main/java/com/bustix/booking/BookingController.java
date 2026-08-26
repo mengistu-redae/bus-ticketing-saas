@@ -240,6 +240,12 @@ public class BookingController {
         return e.getMessage();
     }
 
+    @ExceptionHandler(OperatorInactiveException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public String handleOperatorInactive(OperatorInactiveException e) {
+        return e.getMessage();
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public String handleNotFound(NoSuchElementException e) {

@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -30,6 +31,7 @@ import java.util.UUID;
 public class CargoWaybillService {
 
     private final CargoWaybillRepository cargoWaybillRepository;
+    private final CargoWaybillItemRepository cargoWaybillItemRepository;
     private final CargoWaybillCancellationRepository cancellationRepository;
     private final CargoRateRepository cargoRateRepository;
     private final TripRepository tripRepository;
@@ -42,6 +44,7 @@ public class CargoWaybillService {
 
     public CargoWaybillService(
             CargoWaybillRepository cargoWaybillRepository,
+            CargoWaybillItemRepository cargoWaybillItemRepository,
             CargoWaybillCancellationRepository cancellationRepository,
             CargoRateRepository cargoRateRepository,
             TripRepository tripRepository,
@@ -52,6 +55,7 @@ public class CargoWaybillService {
             ProhibitedItemsChecker prohibitedItemsChecker,
             RefundCalculator refundCalculator) {
         this.cargoWaybillRepository = cargoWaybillRepository;
+        this.cargoWaybillItemRepository = cargoWaybillItemRepository;
         this.cancellationRepository = cancellationRepository;
         this.cargoRateRepository = cargoRateRepository;
         this.tripRepository = tripRepository;
@@ -77,9 +81,15 @@ public class CargoWaybillService {
             }
         }
 
-        prohibitedItemsChecker.check(request.description());
+        if (request.description() != null) {
+            prohibitedItemsChecker.check(request.description());
+        }
+        for (CreateWaybillRequest.ItemRequest item : request.items()) {
+            prohibitedItemsChecker.check(item.description());
+        }
 
-        Pricing pricing = calculatePricing(tenantId, trip.getRouteId(), request.grossWeightKg());
+        BigDecimal totalWeight = sumWeight(request.items());
+        Pricing pricing = calculatePricing(tenantId, trip.getRouteId(), totalWeight);
 
         String operatorName = operatorRepository.findById(tenantId).map(Operator::getName).orElse("Unknown");
 
@@ -95,14 +105,16 @@ public class CargoWaybillService {
         waybill.setConsigneePhone(request.consigneePhone());
         waybill.setConsigneeIdNumber(request.consigneeIdNumber());
         waybill.setDescription(request.description());
-        waybill.setQuantity(request.quantity());
-        waybill.setDeclaredValue(request.declaredValue());
-        waybill.setGrossWeightKg(request.grossWeightKg());
+        waybill.setDeclaredValue(sumDeclaredValue(request.items()));
+        waybill.setGrossWeightKg(totalWeight);
         applyPricing(waybill, pricing);
         waybill.setStatus("issued");
         waybill.setIssuedBy(issuedByUserId);
 
-        return cargoWaybillRepository.save(waybill);
+        waybill = cargoWaybillRepository.save(waybill);
+        saveItems(waybill.getId(), request.items());
+
+        return waybill;
     }
 
     /**
@@ -121,9 +133,7 @@ public class CargoWaybillService {
                 || request.consigneePhone() != null
                 || request.consigneeIdNumber() != null
                 || request.description() != null
-                || request.quantity() != null
-                || request.declaredValue() != null
-                || request.grossWeightKg() != null;
+                || request.items() != null;
 
         if (touchesPhysicalFields && !"issued".equals(waybill.getStatus())) {
             throw new InvalidWaybillStatusException(
@@ -153,20 +163,27 @@ public class CargoWaybillService {
             prohibitedItemsChecker.check(request.description());
             waybill.setDescription(request.description());
         }
-        if (request.quantity() != null) {
-            waybill.setQuantity(request.quantity());
-        }
-        if (request.declaredValue() != null) {
-            waybill.setDeclaredValue(request.declaredValue());
-        }
-        if (request.grossWeightKg() != null) {
-            waybill.setGrossWeightKg(request.grossWeightKg());
+        if (request.items() != null) {
+            if (request.items().isEmpty()) {
+                throw new InvalidWaybillItemsException("A waybill must have at least one item");
+            }
+            for (CreateWaybillRequest.ItemRequest item : request.items()) {
+                prohibitedItemsChecker.check(item.description());
+            }
+
+            BigDecimal totalWeight = sumWeight(request.items());
+            waybill.setGrossWeightKg(totalWeight);
+            waybill.setDeclaredValue(sumDeclaredValue(request.items()));
+
             Trip trip = tripRepository.findById(waybill.getTripId())
                     .orElseThrow(() -> new NoSuchElementException("Trip not found: " + waybill.getTripId()));
             // Re-priced against whatever cargo_rates row resolves *now* -
             // acceptable for a pre-dispatch same-day correction, see
             // CargoWaybillService's own javadoc / the scope doc's decision 3.
-            applyPricing(waybill, calculatePricing(tenantId, trip.getRouteId(), request.grossWeightKg()));
+            applyPricing(waybill, calculatePricing(tenantId, trip.getRouteId(), totalWeight));
+
+            cargoWaybillItemRepository.deleteAllByWaybillId(waybillId);
+            saveItems(waybillId, request.items());
         }
         if (request.paymentStatus() != null) {
             waybill.setPaymentStatus(request.paymentStatus());
@@ -320,6 +337,35 @@ public class CargoWaybillService {
         waybill.setWeightSurcharge(pricing.weightSurcharge());
         waybill.setHandlingServiceFee(pricing.handlingFee());
         waybill.setTotalCargoCost(pricing.totalCost());
+    }
+
+    private BigDecimal sumWeight(List<CreateWaybillRequest.ItemRequest> items) {
+        return items.stream()
+                .map(CreateWaybillRequest.ItemRequest::grossWeightKg)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /** Null-safe sum - null only if every item left declaredValue unset, matching a single item's own "optional" semantics. */
+    private BigDecimal sumDeclaredValue(List<CreateWaybillRequest.ItemRequest> items) {
+        boolean anyPresent = items.stream().anyMatch(item -> item.declaredValue() != null);
+        if (!anyPresent) {
+            return null;
+        }
+        return items.stream()
+                .map(item -> item.declaredValue() != null ? item.declaredValue() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private void saveItems(UUID waybillId, List<CreateWaybillRequest.ItemRequest> items) {
+        for (CreateWaybillRequest.ItemRequest item : items) {
+            CargoWaybillItem entity = new CargoWaybillItem();
+            entity.setWaybillId(waybillId);
+            entity.setDescription(item.description());
+            entity.setQuantity(item.quantity());
+            entity.setDeclaredValue(item.declaredValue());
+            entity.setGrossWeightKg(item.grossWeightKg());
+            cargoWaybillItemRepository.save(entity);
+        }
     }
 
     private record Pricing(

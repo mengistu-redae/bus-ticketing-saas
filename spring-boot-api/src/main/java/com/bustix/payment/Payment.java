@@ -13,12 +13,15 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * A payment collected against a booking. Schema has existed since V1 (cash
- * today, a real gateway later - see the comment on `payments` in
- * V1__init.sql) but nothing wrote to it until PaymentController. No
- * tenant_id of its own - scoped via booking_id, same shape as
- * BookingSeat/Cancellation/Notification; PaymentController resolves the
- * tenant check through the booking.
+ * A payment collected against a booking, or (since V10) a cargo waybill.
+ * Schema has existed since V1 (cash today, a real gateway later - see the
+ * comment on `payments` in V1__init.sql) but nothing wrote to it until
+ * PaymentController. No tenant_id of its own - scoped via bookingId or
+ * waybillId, same shape as BookingSeat/Cancellation/Notification;
+ * PaymentController/CargoPaymentController each resolve the tenant check
+ * through their own parent. Exactly one of bookingId/waybillId is set -
+ * enforced by a DB CHECK constraint (V10), not application code, so a
+ * stray direct-SQL insert can't violate it either.
  */
 @Entity
 @Table(name = "payments")
@@ -30,8 +33,11 @@ public class Payment {
     @GeneratedValue
     private UUID id;
 
-    @Column(name = "booking_id", nullable = false)
+    @Column(name = "booking_id")
     private UUID bookingId;
+
+    @Column(name = "waybill_id")
+    private UUID waybillId;
 
     /** cash today, gateway later. */
     @Column(nullable = false)

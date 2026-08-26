@@ -178,6 +178,84 @@ class BookingIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isNotFound());
     }
 
+    // --- Operator status enforcement: deactivating an operator
+    // (PlatformController.deactivate) blocks new bookings against its trips
+    // - booking-time only, deliberately not enforced at search or staff
+    // login (see CLAUDE.md's Operator status enforcement note).
+
+    @Test
+    void bookingIsBlockedWhenTheTripsOperatorIsDeactivated() throws Exception {
+        Operator operator = createOperator("booking-inactive-" + UUID.randomUUID(), "Inactive Co");
+        var bus = createBus(operator.getId(), "BK-9", 10, "2x2");
+        var route = createRoute(operator.getId(), "Addis Ababa", "Adama");
+        Trip trip = createTrip(operator.getId(), route.getId(), bus.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("120.00"));
+        Seat seat = createSeat(trip.getId(), "1A");
+
+        operator.setStatus("inactive");
+        operatorRepository.save(operator);
+
+        mockMvc.perform(post("/api/bookings")
+                        .with(asCustomer("customer-1"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CreateBookingRequest(trip.getId(), passengers(seat.getId()), "idem-inactive"))))
+                .andExpect(status().isConflict());
+
+        // The seat was never actually locked/sold - still open for booking
+        // once the operator is reactivated.
+        assertThat(seatRepository.findById(seat.getId()).orElseThrow().getStatus()).isEqualTo("open");
+    }
+
+    @Test
+    void guestBookingIsBlockedWhenTheTripsOperatorIsDeactivated() throws Exception {
+        Operator operator = createOperator("booking-inactive-guest-" + UUID.randomUUID(), "Inactive Guest Co");
+        var bus = createBus(operator.getId(), "BK-10", 10, "2x2");
+        var route = createRoute(operator.getId(), "Addis Ababa", "Adama");
+        Trip trip = createTrip(operator.getId(), route.getId(), bus.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("120.00"));
+        Seat seat = createSeat(trip.getId(), "1A");
+
+        operator.setStatus("inactive");
+        operatorRepository.save(operator);
+
+        var request = new CreateGuestBookingRequest(
+                trip.getId(), passengers(seat.getId()), "idem-guest-inactive", "+251911234567", null);
+
+        mockMvc.perform(post("/api/bookings/guest")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void bookingSucceedsAgainOnceADeactivatedOperatorIsReactivated() throws Exception {
+        Operator operator = createOperator("booking-reactivated-" + UUID.randomUUID(), "Reactivated Co");
+        var bus = createBus(operator.getId(), "BK-11", 10, "2x2");
+        var route = createRoute(operator.getId(), "Addis Ababa", "Adama");
+        Trip trip = createTrip(operator.getId(), route.getId(), bus.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("120.00"));
+        Seat seat = createSeat(trip.getId(), "1A");
+
+        operator.setStatus("inactive");
+        operatorRepository.save(operator);
+        mockMvc.perform(post("/api/bookings")
+                        .with(asCustomer("customer-1"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CreateBookingRequest(trip.getId(), passengers(seat.getId()), "idem-reactivate-1"))))
+                .andExpect(status().isConflict());
+
+        operator.setStatus("active");
+        operatorRepository.save(operator);
+        mockMvc.perform(post("/api/bookings")
+                        .with(asCustomer("customer-1"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CreateBookingRequest(trip.getId(), passengers(seat.getId()), "idem-reactivate-2"))))
+                .andExpect(status().isOk());
+    }
+
     // --- GET /api/bookings(/{id})(/seats) - staff (agent/operator_admin)
     // tenant-scoped lookups, added alongside the ticketing fields above:
     // previously nothing exposed BookingRepository's tenant-scoped finders

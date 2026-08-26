@@ -53,15 +53,15 @@ public class CargoWaybill extends BaseTenantEntity {
     @Column(name = "consignee_id_number", nullable = false)
     private String consigneeIdNumber;
 
-    @Column(nullable = false)
+    /** Optional shipment-level summary - CargoWaybillItem rows (see V9) carry the real per-item detail. */
+    @Column
     private String description;
 
-    @Column(nullable = false)
-    private Integer quantity = 1;
-
+    /** Snapshotted SUM of every CargoWaybillItem.declaredValue at write time - see CargoWaybillService. */
     @Column(name = "declared_value")
     private BigDecimal declaredValue;
 
+    /** Snapshotted SUM of every CargoWaybillItem.grossWeightKg at write time - see CargoWaybillService. */
     @Column(name = "gross_weight_kg", nullable = false)
     private BigDecimal grossWeightKg;
 

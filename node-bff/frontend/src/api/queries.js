@@ -368,9 +368,12 @@ export function useDeleteRefundPolicy() {
 
 // ---- cargo waybills (agent/operator_admin, tenant-scoped) ----
 // /api/cargo/waybills(/{id})(/dispatch|arrive|collect|cancel) - staff-only,
-// see com.bustix.cargo.CargoWaybillController. Mutations return the
-// mutated waybill (same convention as fleet endpoints), but the list is
-// still invalidated since a list view needs to pick up status changes too.
+// see com.bustix.cargo.CargoWaybillController. Every read/mutation here
+// resolves to a WaybillWithItems shape ({waybill, items: [...]}), not a
+// bare CargoWaybill - a shipment is one or more line items (see
+// CargoWaybillItem), which the entity itself doesn't carry inline. The
+// list is still invalidated on mutation since a list view needs to pick
+// up status changes too.
 
 export function useWaybills({ tripId, status } = {}) {
   const params = new URLSearchParams();
@@ -440,6 +443,30 @@ export function useCancelWaybill(waybillId) {
   return useWaybillLifecycleAction(waybillId, 'cancel');
 }
 
+// ---- cargo payments (agent/operator_admin, waybill-scoped) ----
+// /api/cargo/waybills/{waybillId}/payments(/{id}) - the freight counterpart
+// to usePayments/useCreatePayment above, same Payment entity/table (V10
+// added a nullable waybill_id). Separate query key namespace so
+// invalidation doesn't collide with booking payments.
+
+export function useWaybillPayments(waybillId) {
+  return useQuery({
+    queryKey: ['cargo', 'waybills', waybillId, 'payments'],
+    queryFn: () => apiGet(`/api/cargo/waybills/${waybillId}/payments`),
+    enabled: Boolean(waybillId),
+  });
+}
+
+export function useCreateWaybillPayment(waybillId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost(`/api/cargo/waybills/${waybillId}/payments`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cargo', 'waybills', waybillId, 'payments'] });
+    },
+  });
+}
+
 // ---- cargo rates (operator_admin) ----
 // /api/fleet/cargo-rates - same shape as refund-policies above, including
 // route_id nullable = operator-wide default. Real delete, not
@@ -477,7 +504,8 @@ export function useDeleteCargoRate() {
 // /api/my-shipments(/{id}) - the cargo counterpart to useMyBookings above.
 // Scoped through waybills attached to a booking the customer owns; a
 // standalone staff-created waybill with no bookingId never appears here -
-// see CargoWaybillRepository.findAllByBookingCustomerUserId.
+// see CargoWaybillRepository.findAllByBookingCustomerUserId. Resolves to
+// WaybillWithItems shapes, same as the staff cargo hooks above.
 
 export function useMyShipments() {
   return useQuery({ queryKey: ['my-shipments'], queryFn: () => apiGet('/api/my-shipments') });
