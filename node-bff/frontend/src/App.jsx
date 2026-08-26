@@ -27,6 +27,7 @@ import Track from './pages/Track.jsx';
 import TrackBooking from './pages/TrackBooking.jsx';
 import MyShipments from './pages/customer/MyShipments.jsx';
 import MyShipmentDetail from './pages/customer/MyShipmentDetail.jsx';
+import RequestShipment from './pages/customer/RequestShipment.jsx';
 
 function RootLayout() {
   const { isLoading, authenticated } = useAuth();
@@ -81,6 +82,14 @@ export default function App() {
           element={
             <RequireRole role="customer">
               <MyShipments />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/my-shipments/request"
+          element={
+            <RequireRole role="customer">
+              <RequestShipment />
             </RequireRole>
           }
         />

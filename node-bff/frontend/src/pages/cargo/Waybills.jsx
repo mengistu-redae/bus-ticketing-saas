@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useCreateWaybill, useFleetRoutes, useFleetTrips, useWaybills } from '../../api/queries.js';
+import { useCreateWaybill, useFleetRoutes, useFleetTrips, usePendingCargoRequests, useWaybills } from '../../api/queries.js';
 import StatusPill from '../../components/StatusPill.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
@@ -40,6 +40,7 @@ const emptyForm = {
 export default function Waybills() {
   const [statusFilter, setStatusFilter] = useState('');
   const { data: waybills, isLoading, isError, error, refetch } = useWaybills({ status: statusFilter || undefined });
+  const { data: pendingRequests } = usePendingCargoRequests();
   const { data: trips } = useFleetTrips();
   const { data: routes } = useFleetRoutes();
   const createWaybill = useCreateWaybill();
@@ -101,6 +102,34 @@ export default function Waybills() {
           <option value="cancelled">Cancelled</option>
         </select>
       </div>
+
+      {pendingRequests?.length > 0 && (
+        <div className="mb-6 rounded-xl border border-warning/40 bg-warning-light p-4">
+          <h2 className="mb-3 text-sm font-semibold text-ink">
+            Pending customer requests ({pendingRequests.length})
+          </h2>
+          <div className="flex flex-col gap-2">
+            {pendingRequests.map(({ waybill: wb, items }) => (
+              <Link
+                key={wb.id}
+                to={`/cargo/waybills/${wb.id}`}
+                className="flex items-center justify-between rounded-lg border border-slate-200 bg-surface p-3 hover:border-brand/40"
+              >
+                <div>
+                  <span className="font-mono text-xs text-ink-muted">{wb.waybillNumber}</span>
+                  <p className="text-sm font-semibold text-ink">
+                    {wb.consignorName} → {wb.consigneeName}
+                  </p>
+                  <p className="text-xs text-ink-muted">
+                    {wb.description || `${items.length} item${items.length === 1 ? '' : 's'}`} · {wb.grossWeightKg} kg
+                  </p>
+                </div>
+                <span className="text-sm font-medium text-brand">Review &rsaquo;</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleCreate} className="mb-6 rounded-xl border border-slate-200 bg-surface p-4">
         <Field label="Trip">

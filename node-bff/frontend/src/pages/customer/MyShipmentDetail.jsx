@@ -7,12 +7,14 @@ import { formatCurrency, formatDateTime } from '../../lib/format.js';
 
 /**
  * Read-only counterpart to pages/cargo/WaybillDetail.jsx - a customer can
- * see a shipment attached to their own booking, but every lifecycle action
- * (dispatch/arrive/collect/cancel/edit/payment status) stays staff-only, so
- * none of that is offered here at all. Route/departure resolved via GET
- * /api/trips/{tripId} (public/customer-accessible) rather than the
- * tenant-scoped fleet trips/routes lists WaybillDetail.jsx uses, since a
- * customer JWT has no access to those.
+ * see a shipment attached to their own booking or requested directly, but
+ * every lifecycle/review action (dispatch/arrive/collect/cancel/edit/
+ * confirm-and-issue/payment status) stays staff-only, so none of that is
+ * offered here at all. Route/departure resolved via GET /api/trips/{tripId}
+ * (public/customer-accessible) rather than the tenant-scoped fleet trips/
+ * routes lists WaybillDetail.jsx uses, since a customer JWT has no access
+ * to those - moot anyway for a still-"requested" shipment, which has no
+ * trip yet.
  */
 export default function MyShipmentDetail() {
   const { waybillId } = useParams();
@@ -42,6 +44,13 @@ export default function MyShipmentDetail() {
         <StatusPill status={waybill.status} />
       </div>
 
+      {waybill.status === 'requested' && (
+        <div className="mb-4 rounded-lg bg-warning-light px-3 py-2 text-sm text-warning">
+          Pending staff review - bring this to the counter and a staff member will weigh it, assign it to a bus, and
+          confirm the final price.
+        </div>
+      )}
+
       <div className="rounded-xl border border-slate-200 bg-surface p-5">
         {trip ? (
           <>
@@ -51,7 +60,9 @@ export default function MyShipmentDetail() {
             <p className="text-sm text-ink-muted">Departs {formatDateTime(trip.departureAt)}</p>
           </>
         ) : (
-          <p className="text-sm italic text-ink-muted">Trip details unavailable.</p>
+          <p className="text-sm italic text-ink-muted">
+            {waybill.status === 'requested' ? 'No trip assigned yet.' : 'Trip details unavailable.'}
+          </p>
         )}
 
         <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 text-sm">

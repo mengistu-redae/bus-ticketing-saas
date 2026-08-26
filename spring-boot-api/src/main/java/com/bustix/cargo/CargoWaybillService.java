@@ -286,6 +286,106 @@ public class CargoWaybillService {
     }
 
     /**
+     * Customer self-service shipment request (POST /api/my-shipments) - no
+     * trip, no tenant, no pricing yet, status "requested". Staff reviews
+     * and prices it via confirmAndIssue. Items are customer-declared
+     * estimates, still checked against ProhibitedItemsChecker - a customer
+     * shouldn't be able to request shipping a prohibited item any more
+     * than staff can create one.
+     */
+    @Transactional
+    public CargoWaybill requestShipment(CreateShipmentRequest request, UUID customerUserId) {
+        if (request.description() != null) {
+            prohibitedItemsChecker.check(request.description());
+        }
+        for (CreateWaybillRequest.ItemRequest item : request.items()) {
+            prohibitedItemsChecker.check(item.description());
+        }
+
+        CargoWaybill waybill = new CargoWaybill();
+        // tenantId/tripId intentionally left null until confirmAndIssue -
+        // a customer request has no operator or trip yet, see
+        // CargoWaybill's own javadoc for why this entity can hold that
+        // state at all (it no longer extends BaseTenantEntity).
+        waybill.setCustomerUserId(customerUserId);
+        waybill.setWaybillNumber(waybillNumberGenerator.nextWaybillNumber("REQ"));
+        waybill.setConsignorName(request.consignorName());
+        waybill.setConsignorPhone(request.consignorPhone());
+        waybill.setConsignorIdNumber(request.consignorIdNumber());
+        waybill.setConsigneeName(request.consigneeName());
+        waybill.setConsigneePhone(request.consigneePhone());
+        waybill.setConsigneeIdNumber(request.consigneeIdNumber());
+        waybill.setDescription(request.description());
+        waybill.setDeclaredValue(sumDeclaredValue(request.items()));
+        waybill.setGrossWeightKg(sumWeight(request.items()));
+        waybill.setStatus("requested");
+
+        waybill = cargoWaybillRepository.save(waybill);
+        saveItems(waybill.getId(), request.items());
+        return waybill;
+    }
+
+    /**
+     * Staff review of a "requested" waybill: assigns the real trip
+     * (tenant-scoped - the first point this waybill gets an operator),
+     * optionally corrects the consignee ID / re-weighs the items after
+     * physically inspecting the shipment, computes real pricing, and flips
+     * requested -> issued. Idempotent past "requested" (already-issued-or-
+     * later just returns current state, same convention as dispatch/
+     * arrive/collect), 409s via RequestNotIssuableException on anything
+     * else (out of order, or a still-missing consigneeIdNumber).
+     */
+    @Transactional
+    public CargoWaybill confirmAndIssue(UUID waybillId, UUID tenantId, UUID issuedByUserId, ConfirmAndIssueWaybillRequest request) {
+        CargoWaybill waybill = cargoWaybillRepository.findById(waybillId)
+                .orElseThrow(() -> new NoSuchElementException("Waybill not found: " + waybillId));
+
+        if (!"requested".equals(waybill.getStatus())) {
+            if (tenantId.equals(waybill.getTenantId()) && !"cancelled".equals(waybill.getStatus())) {
+                return waybill; // idempotent re-call once already issued (or later)
+            }
+            throw new RequestNotIssuableException(
+                    "Waybill " + waybillId + " is " + waybill.getStatus()
+                            + " - only a requested waybill can be confirmed and issued");
+        }
+
+        Trip trip = tripRepository.findByIdAndTenantId(request.tripId(), tenantId)
+                .orElseThrow(() -> new NoSuchElementException("Trip not found: " + request.tripId()));
+
+        String consigneeIdNumber = request.consigneeIdNumber() != null
+                ? request.consigneeIdNumber() : waybill.getConsigneeIdNumber();
+        if (consigneeIdNumber == null || consigneeIdNumber.isBlank()) {
+            throw new RequestNotIssuableException("consigneeIdNumber is required to issue waybill " + waybillId);
+        }
+
+        List<CreateWaybillRequest.ItemRequest> items = request.items();
+        if (items != null) {
+            for (CreateWaybillRequest.ItemRequest item : items) {
+                prohibitedItemsChecker.check(item.description());
+            }
+            cargoWaybillItemRepository.deleteAllByWaybillId(waybillId);
+            saveItems(waybillId, items);
+        } else {
+            items = cargoWaybillItemRepository.findAllByWaybillId(waybillId).stream()
+                    .map(i -> new CreateWaybillRequest.ItemRequest(i.getDescription(), i.getQuantity(), i.getDeclaredValue(), i.getGrossWeightKg()))
+                    .toList();
+        }
+
+        BigDecimal totalWeight = sumWeight(items);
+        Pricing pricing = calculatePricing(tenantId, trip.getRouteId(), totalWeight);
+
+        waybill.setTenantId(tenantId);
+        waybill.setTripId(trip.getId());
+        waybill.setConsigneeIdNumber(consigneeIdNumber);
+        waybill.setGrossWeightKg(totalWeight);
+        waybill.setDeclaredValue(sumDeclaredValue(items));
+        applyPricing(waybill, pricing);
+        waybill.setStatus("issued");
+        waybill.setIssuedBy(issuedByUserId);
+        return cargoWaybillRepository.save(waybill);
+    }
+
+    /**
      * Public, unauthenticated - see decision 9. `phone` must match either
      * consignorPhone or consigneePhone; any other mismatch (unknown waybill
      * number, wrong phone) 404s identically, same "exists but not yours

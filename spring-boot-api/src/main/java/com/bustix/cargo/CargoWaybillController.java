@@ -143,7 +143,7 @@ public class CargoWaybillController {
     @PreAuthorize("hasRole('CUSTOMER')")
     public List<WaybillWithItems> myShipments(@AuthenticationPrincipal Jwt jwt) {
         UUID customerUserId = currentUserService.resolveInternalUserId(jwt);
-        return cargoWaybillRepository.findAllByBookingCustomerUserId(customerUserId).stream()
+        return cargoWaybillRepository.findAllOwnedByCustomer(customerUserId).stream()
                 .map(this::withItems)
                 .toList();
     }
@@ -152,9 +152,47 @@ public class CargoWaybillController {
     @PreAuthorize("hasRole('CUSTOMER')")
     public WaybillWithItems myShipment(@PathVariable UUID waybillId, @AuthenticationPrincipal Jwt jwt) {
         UUID customerUserId = currentUserService.resolveInternalUserId(jwt);
-        CargoWaybill waybill = cargoWaybillRepository.findByIdAndBookingCustomerUserId(waybillId, customerUserId)
+        CargoWaybill waybill = cargoWaybillRepository.findByIdOwnedByCustomer(waybillId, customerUserId)
                 .orElseThrow(() -> new NoSuchElementException("Waybill not found: " + waybillId));
         return withItems(waybill);
+    }
+
+    /**
+     * Customer self-service shipment request - no trip picked yet, no
+     * pricing, status "requested". Staff reviews/prices/issues it via
+     * confirmAndIssue below. See CargoWaybillService.requestShipment.
+     */
+    @PostMapping("/api/my-shipments")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    public WaybillWithItems requestShipment(@Valid @RequestBody CreateShipmentRequest request, @AuthenticationPrincipal Jwt jwt) {
+        UUID customerUserId = currentUserService.resolveInternalUserId(jwt);
+        return withItems(cargoWaybillService.requestShipment(request, customerUserId));
+    }
+
+    /**
+     * Staff-facing inbox of "requested" waybills awaiting review - see
+     * CargoWaybillRepository.findAllByStatusAndTenantIdIsNull's javadoc for
+     * why this is visible to any operator's staff, not tenant-scoped like
+     * every other staff endpoint here.
+     */
+    @GetMapping("/api/cargo/requests")
+    @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
+    public List<WaybillWithItems> pendingRequests() {
+        return cargoWaybillRepository.findAllByStatusAndTenantIdIsNull("requested").stream()
+                .map(this::withItems)
+                .toList();
+    }
+
+    /** See CargoWaybillService.confirmAndIssue. */
+    @PostMapping("/api/cargo/waybills/{waybillId}/confirm-and-issue")
+    @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
+    public WaybillWithItems confirmAndIssue(
+            @PathVariable UUID waybillId,
+            @Valid @RequestBody ConfirmAndIssueWaybillRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID tenantId = TenantContext.require();
+        UUID issuedByUserId = currentUserService.resolveInternalUserId(jwt);
+        return withItems(cargoWaybillService.confirmAndIssue(waybillId, tenantId, issuedByUserId, request));
     }
 
     @ExceptionHandler(ProhibitedItemException.class)
@@ -172,6 +210,12 @@ public class CargoWaybillController {
     @ExceptionHandler(InvalidWaybillItemsException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public String handleInvalidItems(InvalidWaybillItemsException e) {
+        return e.getMessage();
+    }
+
+    @ExceptionHandler(RequestNotIssuableException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public String handleRequestNotIssuable(RequestNotIssuableException e) {
         return e.getMessage();
     }
 

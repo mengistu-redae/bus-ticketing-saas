@@ -502,9 +502,11 @@ export function useDeleteCargoRate() {
 
 // ---- a logged-in customer's own shipment history ----
 // /api/my-shipments(/{id}) - the cargo counterpart to useMyBookings above.
-// Scoped through waybills attached to a booking the customer owns; a
-// standalone staff-created waybill with no bookingId never appears here -
-// see CargoWaybillRepository.findAllByBookingCustomerUserId. Resolves to
+// Scoped through two ownership paths combined, not mutually exclusive:
+// waybills attached to a booking the customer owns, and (since
+// 2026-08-26) waybills the customer requested directly - see
+// CargoWaybillRepository.findAllOwnedByCustomer. A standalone
+// staff-created waybill with neither never appears here. Resolves to
 // WaybillWithItems shapes, same as the staff cargo hooks above.
 
 export function useMyShipments() {
@@ -516,6 +518,36 @@ export function useMyShipment(waybillId) {
     queryKey: ['my-shipments', waybillId],
     queryFn: () => apiGet(`/api/my-shipments/${waybillId}`),
     enabled: Boolean(waybillId),
+  });
+}
+
+/** POST /api/my-shipments - a customer's own shipment request, status "requested" until staff confirm-and-issue it. See CargoWaybillService.requestShipment. */
+export function useRequestShipment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/my-shipments', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['my-shipments'] }),
+  });
+}
+
+// ---- staff: customer shipment requests awaiting review ----
+// /api/cargo/requests (the "requested"-status inbox) and the
+// confirm-and-issue action that turns one into a normal issued waybill -
+// see CargoWaybillRepository.findAllByStatusAndTenantIdIsNull and
+// CargoWaybillService.confirmAndIssue.
+
+export function usePendingCargoRequests() {
+  return useQuery({ queryKey: ['cargo', 'requests'], queryFn: () => apiGet('/api/cargo/requests') });
+}
+
+export function useConfirmAndIssueWaybill(waybillId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost(`/api/cargo/waybills/${waybillId}/confirm-and-issue`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cargo', 'requests'] });
+      queryClient.invalidateQueries({ queryKey: ['cargo', 'waybills'] });
+    },
   });
 }
 

@@ -8,11 +8,12 @@ import { formatCurrency, formatDateTime } from '../../lib/format.js';
 
 /**
  * The cargo counterpart to MyBookings.jsx - GET /api/my-shipments, scoped
- * through waybills attached to a booking this customer owns (see
- * CargoWaybillRepository.findAllByBookingCustomerUserId). A standalone
- * staff-created waybill with no bookingId never shows up here for anyone -
- * waybills are still staff-issued in v1, this is only a read-only history
- * view, same as MyBookings has no create-booking form of its own.
+ * through two combined ownership paths (see
+ * CargoWaybillRepository.findAllOwnedByCustomer): waybills attached to a
+ * booking this customer owns, and (since 2026-08-26) waybills the customer
+ * requested directly via "Request a shipment" below - those start
+ * "requested" and stay that way until a staff member confirms and prices
+ * them at the counter.
  */
 export default function MyShipments() {
   const { data, isLoading, isError, error, refetch } = useMyShipments();
@@ -23,7 +24,15 @@ export default function MyShipments() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-ink">My Shipments</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-ink">My Shipments</h1>
+        <Link
+          to="/my-shipments/request"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark"
+        >
+          Request a shipment
+        </Link>
+      </div>
 
       {isLoading && (
         <div className="flex flex-col gap-3">
@@ -37,7 +46,7 @@ export default function MyShipments() {
       {!isLoading && !isError && shipments.length === 0 && (
         <EmptyState
           title="No shipments yet"
-          description="Shipments attached to one of your bookings by an operator's agent will show up here."
+          description="Request a shipment above, or one attached to your booking by an operator's agent will show up here."
         />
       )}
 

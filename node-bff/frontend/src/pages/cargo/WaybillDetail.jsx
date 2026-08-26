@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import {
   useArriveWaybill,
   useCancelWaybill,
   useCollectWaybill,
+  useConfirmAndIssueWaybill,
   useCreateWaybillPayment,
   useDispatchWaybill,
   useFleetRoutes,
@@ -29,6 +30,13 @@ const inputClass =
  * trips/routes lists (same pattern Waybills.jsx uses), not GET
  * /api/trips/{tripId} - that endpoint is CUSTOMER/AGENT only, not
  * OPERATOR_ADMIN, and this page has to work for both roles.
+ *
+ * A "requested" waybill (a customer's own shipment request, not yet
+ * staff-priced - see CargoWaybillService.requestShipment) has no trip/
+ * pricing/payment-status yet, so this page swaps its normal action UI for
+ * a "Confirm and issue" form instead (trip picker + consignee ID +
+ * pre-filled items editor), calling confirmAndIssue to turn it into a
+ * normal issued waybill.
  */
 export default function WaybillDetail() {
   const { waybillId } = useParams();
@@ -44,6 +52,14 @@ export default function WaybillDetail() {
   const { data: routes } = useFleetRoutes();
   const trip = waybill ? (trips || []).find((t) => t.id === waybill.tripId) : null;
   const route = trip ? (routes || []).find((r) => r.id === trip.routeId) : null;
+  const routeById = Object.fromEntries((routes || []).map((r) => [r.id, r]));
+  const scheduledTrips = (trips || []).filter((t) => t.status === 'scheduled');
+
+  function tripLabel(t) {
+    const r = routeById[t.routeId];
+    const routeLabel = r ? `${r.origin} → ${r.destination}` : 'Unknown route';
+    return `${routeLabel} · ${formatDateTime(t.departureAt)}`;
+  }
 
   const dispatchWaybill = useDispatchWaybill(waybillId);
   const arriveWaybill = useArriveWaybill(waybillId);
@@ -52,6 +68,7 @@ export default function WaybillDetail() {
   const updateWaybill = useUpdateWaybill(waybillId);
   const paymentsQuery = useWaybillPayments(waybillId);
   const createPayment = useCreateWaybillPayment(waybillId);
+  const confirmAndIssueWaybill = useConfirmAndIssueWaybill(waybillId);
 
   const [actionError, setActionError] = useState(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -62,6 +79,28 @@ export default function WaybillDetail() {
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentTxnId, setPaymentTxnId] = useState('');
   const [paymentError, setPaymentError] = useState(null);
+  const [confirmForm, setConfirmForm] = useState(null);
+
+  // Pre-fill the confirm-and-issue form (trip picker + consignee ID +
+  // items editor) from the customer's own request once it's loaded -
+  // lazy, one-time init the same way startEdit() populates editForm, just
+  // triggered automatically for a "requested" waybill instead of by a
+  // button click, since that's the only useful thing to do with one.
+  useEffect(() => {
+    if (waybill && waybill.status === 'requested' && confirmForm === null) {
+      setConfirmForm({
+        tripId: '',
+        consigneeIdNumber: waybill.consigneeIdNumber || '',
+        items: items.map((i) => ({
+          description: i.description,
+          quantity: String(i.quantity),
+          declaredValue: i.declaredValue != null ? String(i.declaredValue) : '',
+          grossWeightKg: String(i.grossWeightKg),
+        })),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waybill?.id, waybill?.status]);
 
   async function handleDispatch() {
     setActionError(null);
@@ -103,6 +142,34 @@ export default function WaybillDetail() {
     } catch (err) {
       setActionError(err.message || 'Could not cancel this waybill.');
       setConfirmingCancel(false);
+    }
+  }
+
+  async function handleConfirmAndIssue(event) {
+    event.preventDefault();
+    setActionError(null);
+    const itemsValid = confirmForm.items.length > 0 && confirmForm.items.every((i) => i.description && i.grossWeightKg);
+    if (!confirmForm.tripId) {
+      setActionError('Pick a trip before issuing this waybill.');
+      return;
+    }
+    if (!itemsValid) {
+      setActionError('Every item needs a description and a re-weighed gross weight.');
+      return;
+    }
+    try {
+      await confirmAndIssueWaybill.mutateAsync({
+        tripId: confirmForm.tripId,
+        consigneeIdNumber: confirmForm.consigneeIdNumber || undefined,
+        items: confirmForm.items.map((i) => ({
+          description: i.description,
+          quantity: i.quantity ? Number(i.quantity) : undefined,
+          declaredValue: i.declaredValue ? Number(i.declaredValue) : undefined,
+          grossWeightKg: Number(i.grossWeightKg),
+        })),
+      });
+    } catch (err) {
+      setActionError(err.message || 'Could not confirm and issue this waybill.');
     }
   }
 
@@ -206,7 +273,9 @@ export default function WaybillDetail() {
             {trip && <p className="text-sm text-ink-muted">Departs {formatDateTime(trip.departureAt)}</p>}
           </>
         ) : (
-          <p className="text-sm italic text-ink-muted">Trip details unavailable.</p>
+          <p className="text-sm italic text-ink-muted">
+            {status === 'requested' ? 'No trip assigned yet - pick one below.' : 'Trip details unavailable.'}
+          </p>
         )}
 
         {editing ? (
@@ -340,22 +409,24 @@ export default function WaybillDetail() {
           </div>
         )}
 
-        <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-4 text-sm">
-          <span className="text-ink-muted">Payment</span>
-          <select
-            value={waybill.paymentStatus}
-            onChange={handlePaymentStatusChange}
-            disabled={updateWaybill.isPending}
-            className="rounded-lg border border-slate-300 px-2 py-1 text-sm capitalize focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
-          >
-            <option value="unpaid">Unpaid</option>
-            <option value="paid">Paid</option>
-            <option value="collect_on_delivery">Collect on delivery</option>
-          </select>
-        </div>
+        {status !== 'requested' && (
+          <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-4 text-sm">
+            <span className="text-ink-muted">Payment</span>
+            <select
+              value={waybill.paymentStatus}
+              onChange={handlePaymentStatusChange}
+              disabled={updateWaybill.isPending}
+              className="rounded-lg border border-slate-300 px-2 py-1 text-sm capitalize focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+            >
+              <option value="unpaid">Unpaid</option>
+              <option value="paid">Paid</option>
+              <option value="collect_on_delivery">Collect on delivery</option>
+            </select>
+          </div>
+        )}
       </div>
 
-      {status !== 'cancelled' && (
+      {status !== 'cancelled' && status !== 'requested' && (
         <div className="mt-5 rounded-xl border border-slate-200 bg-surface p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-ink">Payments</h2>
@@ -430,6 +501,54 @@ export default function WaybillDetail() {
         <div className="mt-4">
           <ErrorBanner message={actionError} />
         </div>
+      )}
+
+      {status === 'requested' && confirmForm && (
+        <form onSubmit={handleConfirmAndIssue} className="mt-5 rounded-xl border border-slate-200 bg-surface p-5">
+          <h2 className="mb-3 text-sm font-semibold text-ink">Confirm and issue</h2>
+          <p className="mb-4 text-sm text-ink-muted">
+            Weigh the shipment, assign it to a trip, and confirm the consignee's ID to turn this request into a
+            priced, issued waybill.
+          </p>
+
+          <Field label="Trip">
+            <select
+              value={confirmForm.tripId}
+              onChange={(e) => setConfirmForm({ ...confirmForm, tripId: e.target.value })}
+              className={`${inputClass} max-w-md`}
+            >
+              <option value="">Select a trip</option>
+              {scheduledTrips.map((t) => (
+                <option key={t.id} value={t.id}>{tripLabel(t)}</option>
+              ))}
+            </select>
+          </Field>
+
+          <div className="mt-4 max-w-sm">
+            <Field label="Consignee ID number">
+              <input
+                value={confirmForm.consigneeIdNumber}
+                onChange={(e) => setConfirmForm({ ...confirmForm, consigneeIdNumber: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          <div className="mt-4">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              Items (re-weighed at the counter)
+            </span>
+            <WaybillItemsEditor items={confirmForm.items} onChange={(items) => setConfirmForm({ ...confirmForm, items })} />
+          </div>
+
+          <button
+            type="submit"
+            disabled={confirmAndIssueWaybill.isPending}
+            className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-50"
+          >
+            {confirmAndIssueWaybill.isPending ? 'Issuing…' : 'Confirm and issue'}
+          </button>
+        </form>
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
