@@ -1,0 +1,41 @@
+============================================================
+                    SELAM BUS LOGISTICS 
+                   CARGO / WAYBILL RECEIPT
+============================================================
+Waybill/Way No:    SBC-990812
+Date Issued:       24 AUG 2026
+Origin Office:     Addis Ababa (Merkato Branch)
+Destination:       Gondar Office
+
+SENDER (CONSIGNOR) DETAILS:
+------------------------------------------------------------
+Name:              CHALA/BEKELE MR
+Phone Number:      +251 912 XX XX XX
+
+RECEIVER (CONSIGNEE) DETAILS:
+------------------------------------------------------------
+Name:              HIWOT/ASSEFA MS
+Phone Number:      +251 920 XX XX XX
+
+SHIPMENT SPECIFICATIONS:
+------------------------------------------------------------
+Item Description:  1 Sealed Box (Personal Electronics / Clothes)
+Quantity:          1 Piece
+Declared Value:    15,000.00 ETB (Optional)
+Gross Weight:      45.00 kg
+Excess Weight Vol: 15.00 kg (Over the standard 30kg allowance)
+
+PRICING & BILLING:
+------------------------------------------------------------
+Base Freight Charge:   350.00 ETB
+Weight Surcharge:      150.00 ETB (10 ETB per excess kg)
+Handling/Service Fee:   50.00 ETB
+Total Cost:            550.00 ETB
+Payment Status:        PAID (Cash / CBE Birr)
+
+TERMS & CONDITIONS:
+* Consignee must present a valid ID and Waybill number for pickup.
+* Unclaimed cargo will attract storage fees after 48 hours.
+* Company limit of liability applies for undeclared values.
+============================================================
+

@@ -1,0 +1,118 @@
+
+## how do I start tomorrow?
+
+Two parts: resuming the Claude Code session, and resuming the dev environment.
+
+The Claude Code session
+
+Just start a new session in this same project directory (D:\git-mengistu\SpringBoot\bus-ticketing-saas) — the memory files I wrote today (MEMORY.md and the five detail files) load automatically as background context, and CLAUDE.md is read every session too. You won't need to re-explain any of today's setup or findings.
+
+The dev environment
+
+First check what's actually still running — if your machine doesn't reboot overnight, the background processes may still be alive:
+
+Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -in 5432,6379,8080,8081,3000 }
+
+- If all five ports show up: nothing to do, just pick up where we left off.
+- If some are missing: restart just those, in order, from the repo root:
+
+docker compose up -d --no-deps redis          # only if 6379 is missing
+.\infra\keycloak\start-native.ps1             # only if 8080 is missing
+.\spring-boot-api\start-local.ps1             # only if 8081 is missing
+.\node-bff\start-local.ps1                    # only if 3000 is missing
+
+(Postgres on 5432 is a native Windows service, not something I started — it should just be there.)
+
+Then sanity-check the two app services:
+curl http://localhost:8081/actuator/health   # expect {"status":"UP"}
+curl http://localhost:3000/health            # expect {"status":"ok"}
+
+Once that's confirmed, just tell me what you want to pick up — the open items from today are the native-Keycloak-vs-docker decision, broader test coverage, or nginx, per bus-ticketing-next-steps.md.
+
+
+
+================
+
+Manual startup runbook (native Postgres + native Keycloak + Docker Redis only)
+
+Postgres: nothing to do — it's already running as a Windows service (postgresql-x64-17), starts automatically on boot.
+
+Everything else, from the repo root in PowerShell, in order:
+
+docker compose up -d --no-deps redis          # Redis only - --no-deps stops compose also trying to start its own postgres
+.\infra\keycloak\start-native.ps1             # native Keycloak, port 8080
+.\spring-boot-api\start-local.ps1             # port 8081
+.\node-bff\start-local.ps1                    # port 3000
+
+Health checks:
+curl http://localhost:8081/actuator/health   # expect {"status":"UP"}
+curl http://localhost:3000/health            # expect {"status":"ok"}
+
+Then log in at http://localhost:3000/auth/login.
+
+============
+###################################
+## manual check up in browser 
+###################################
+ in a real browser:
+
+1. Open http://localhost/ (or http://localhost/auth/login) — this should redirect you to Keycloak's login page.
+2. Log in as demo-customer / changeme123 (or demo-operator-admin / changeme123 for the staff side) — it's a two-step form: username first, then password.
+3. After login, Keycloak redirects your browser to localhost:3000/auth/callback momentarily, then on to / — that's the one hop that bypasses nginx's :80, as noted earlier.
+4. Once logged in, http://localhost/auth/me should show your authenticated user JSON.
+5. Whatever the frontend exposes for trip search (if there's a UI page wired to /api/trips/search) should work normally through port 80.
+6. Logging out should go back through Keycloak's end-session endpoint and land you logged out.
+
+If anything looks off in the browser — a redirect loop, a blocked cookie, mixed content, etc. — let me know what you see and I'll dig in. Credentials are also in your bus-ticketing-demo-credentials memory if you need the Keycloak admin console login too.
+
+
+## Manual browser check — nginx entry point (http://localhost)
+
+1. Confirm the stack is up (only if you haven't already):
+- Redis container: bus-ticketing-saas-redis-1 running
+- nginx container: bus-ticketing-saas-nginx-1 running
+- spring-boot-api (port 8081), node-bff (port 3000), native Keycloak (port 8080) all running
+
+2. Open a fresh/private browser window (avoids stale cookies from earlier direct :3000 testing)
+
+3. Go to http://localhost/
+- Should redirect to node-bff's /auth/login, which redirects again to Keycloak's login page at localhost:8080/realms/bustix/...
+- URL bar should now show localhost:8080, a login form with just a username field first
+
+4. Log in
+- Username: demo-customer → click Next/Sign In
+- It'll ask for a password next (two-step form): changeme123
+- (Or use demo-operator-admin / changeme123 to test the staff side instead)
+
+5. After submitting the password
+- Browser briefly hits localhost:3000/auth/callback (this is the one hop that bypasses nginx — expected, see earlier note), then lands back on http://localhost/
+
+6. Verify the session
+- Go to http://localhost/auth/me — should show JSON like {"authenticated":true,"user":{...preferred_username:"demo-customer"...}}
+
+7. Try an API call through nginx
+- Go to http://localhost/api/trips/search?origin=Addis%20Ababa&destination=Bahir%20Dar — should return JSON with the seeded "Demo Bus Co" trip, not an error page
+
+8. Log out
+- Logout is a POST-only route, so it needs a button/form in whatever frontend UI you have — a plain URL visit to /auth/logout won't work (that's a GET, correctly 404s). If there's no frontend page yet, you can skip this step or trigger it via the browser devtools console: fetch('/auth/logout', {method:'POST'}).then(() => location.reload())
+
+What "broken" would look like: a redirect loop, a blank/error page instead of Keycloak's login form, "session invalid" after login, or /api/... calls returning connection errors instead of JSON. If you see any of that, tell me exactly what page/error you hit and I'll dig in.
+
+
+##############################################
+## Ready to continue with Phases 2–4 of the frontend (agent/counter, operator_admin, platform_admin)
+##############################################
+
+Ready to continue with Phases 2–4 of the frontend (agent/counter, operator_admin, platform_admin)
+
+Checkpoint — usage limit approaching, stopping here:
+- Answered the question: partial/incorrect origin-destination input degrades gracefully (empty state, no crash) but is still exact-match under the hood, so typos/partial names silently return zero results with no guidance.
+- Not yet done, worth doing next: decide and implement a real fix — substring (Containing) matching and/or autocomplete on origin/destination, both in spring-boot-api (RouteRepository/TripController) and the frontend search form.
+- Everything from the prior turn (case-sensitivity fix, expired-refresh-token fix, doc/memory updates) is already committed to files and verified live — no loose ends there.
+
+
+
+
+
+
+

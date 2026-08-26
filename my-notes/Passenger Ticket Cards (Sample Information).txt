@@ -1,0 +1,37 @@
+============================================================
+              SELAM BUS LINE SHARE COMPANY 
+             PASSENGER TICKET / ELECTRONIC RECEIPT
+============================================================
+Ticket Number:     SB-2026-9874521
+Booking Ref (PNR): SM76TR
+Issue Date:        24 AUG 2026
+Operator TIN:      0012345678
+
+PASSENGER DETAILS:
+------------------------------------------------------------
+Passenger Name:    MAMO/ALEMU MR
+Phone Number:      +251 911 XX XX XX
+ID/Passport No:    EP0543XXX
+
+TRIP DETAILS:
+------------------------------------------------------------
+From (Origin):     Addis Ababa (Meskel Square Terminal)
+To (Destination):  Bahir Dar
+Departure Date:    25 AUG 2026
+Reporting Time:    04:30 AM (Morning)
+Departure Time:    05:00 AM (Morning)
+Bus Number / Plate: ET-3-A12345
+Seat Number:       12A (Window)
+
+PAYMENT SUMMARY:
+------------------------------------------------------------
+Fare Amount:       1,450.00 ETB
+VAT (15%):         217.50 ETB
+Total Paid:        1,667.50 ETB
+Payment Method:    Telebirr (Txn ID: FT26236XX)
+
+IMPORTANT NOTICE:
+* Please arrive at the terminal 30 minutes before reporting time.
+* Original Kebele ID or Passport is mandatory for boarding.
+* Tickets are non-refundable 24 hours prior to departure.
+============================================================

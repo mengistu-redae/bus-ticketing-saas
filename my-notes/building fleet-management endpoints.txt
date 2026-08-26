@@ -1,0 +1,104 @@
+############################
+## building the fleet-management endpoints 
+############################
+
+endpoints (all OPERATOR_ADMIN-only, tenant-scoped)
+
+┌────────┬───────────────────┬────────────────────────────────────────────────────┐
+│ Method │       Path        │                        Body                        │
+├────────┼───────────────────┼────────────────────────────────────────────────────┤
+│ POST   │ /api/fleet/buses  │ { plateNo, capacity, seatLayout? }                 │
+├────────┼───────────────────┼────────────────────────────────────────────────────┤
+│ GET    │ /api/fleet/buses  │ —                                                  │
+├────────┼───────────────────┼────────────────────────────────────────────────────┤
+│ POST   │ /api/fleet/routes │ { origin, destination, distanceKm? }               │
+├────────┼───────────────────┼────────────────────────────────────────────────────┤
+│ GET    │ /api/fleet/routes │ —                                                  │
+├────────┼───────────────────┼────────────────────────────────────────────────────┤
+│ POST   │ /api/fleet/trips  │ { routeId, busId, departureAt, arrivalAt?, price } │
+├────────┼───────────────────┼────────────────────────────────────────────────────┤
+│ GET    │ /api/fleet/trips  │ —                                                  │
+└────────┴───────────────────┴────────────────────────────────────────────────────┘
+
+Creating a trip auto-generates its seats from the bus's capacity/seatLayout (e.g. "2x2" → 4 seats/row: 1A,1B,1C,1D,2A,...; unparseable layouts fall back to plain 1..capacity), all in one transaction — the same shape as BookingWriter/CancellationService.
+
+Try it — as demo-operator-admin
+
+- URL: http://localhost:3000/auth/login
+- Username: demo-operator-admin
+- Password: changeme123
+
+// 1. Create a bus
+fetch('/api/fleet/buses', {
+  method: 'POST', headers: {'Content-Type':'application/json'},
+  body: JSON.stringify({ plateNo: 'DEMO-002', capacity: 8, seatLayout: '2x2' })
+}).then(r => r.json()).then(console.log)
+// 2. Create a route (use a new city pair so it doesn't collide with the seeded one)
+fetch('/api/fleet/routes', {
+  method: 'POST', headers: {'Content-Type':'application/json'},
+  body: JSON.stringify({ origin: 'Addis Ababa', destination: 'Bahir Dar', distanceKm: 560 })
+}).then(r => r.json()).then(console.log)
+// 3. Create a trip - use the ids returned above
+fetch('/api/fleet/trips', {
+  method: 'POST', headers: {'Content-Type':'application/json'},
+  body: JSON.stringify({
+    routeId: '<ROUTE_ID>', busId: '<BUS_ID>',
+    departureAt: new Date(Date.now() + 2*86400000).toISOString(),
+    price: 800
+  })
+}).then(r => r.json()).then(console.log)
+
+=========
+Then as demo-customer; searching as the customer:
+- URL: http://localhost:3000/auth/login
+- Username: demo-customer
+- Password: changeme123
+
+, confirm it's actually discoverable through last week's search endpoint:
+fetch('/api/trips/search?origin=Addis%20Ababa&destination=Bahir%20Dar')
+  .then(r => r.json()).then(console.log)
+  
+Expect availableSeats: 8 (matching the bus capacity) if the seat-generation logic worked.
+
+
+
+############################
+## results
+############################
+
+fetch('/api/fleet/buses', {
+  method: 'POST', headers: {'Content-Type':'application/json'},
+  body: JSON.stringify({ plateNo: 'DEMO-002', capacity: 8, seatLayout: '2x2' })
+}).then(r => r.json()).then(console.log)
+
+Promise {<pending>}[[Prototype]]: Promise[[PromiseState]]: "fulfilled"[[PromiseResult]]: undefined
+{id: 'c471963d-be7c-4b2b-a5d2-629d634809aa', tenantId: '92810a51-1af9-498a-9e4b-0aaf318be09f', createdAt: '2026-08-22T23:37:58.551604100Z', plateNo: 'DEMO-002', capacity: 8, …}capacity: 8createdAt: "2026-08-22T23:37:58.551604100Z"id: "c471963d-be7c-4b2b-a5d2-629d634809aa"plateNo: "DEMO-002"seatLayout: "2x2"tenantId: "92810a51-1af9-498a-9e4b-0aaf318be09f"[[Prototype]]: Object
+
+========
+
+fetch('/api/fleet/routes', {
+  method: 'POST', headers: {'Content-Type':'application/json'},
+  body: JSON.stringify({ origin: 'Addis Ababa', destination: 'Bahir Dar', distanceKm: 560 })
+}).then(r => r.json()).then(console.log)
+
+Promise {<pending>}[[Prototype]]: Promise[[PromiseState]]: "fulfilled"[[PromiseResult]]: undefined
+{id: 'ebf6d159-0c4a-4c08-bbcf-4c4960617b75', tenantId: '92810a51-1af9-498a-9e4b-0aaf318be09f', createdAt: '2026-08-22T23:38:30.038643100Z', origin: 'Addis Ababa', destination: 'Bahir Dar', …}createdAt: "2026-08-22T23:38:30.038643100Z"destination: "Bahir Dar"distanceKm: 560id: "ebf6d159-0c4a-4c08-bbcf-4c4960617b75"origin: "Addis Ababa"tenantId: "92810a51-1af9-498a-9e4b-0aaf318be09f"[[Prototype]]: Object
+
+=========
+
+fetch('/api/fleet/trips', {
+  method: 'POST', headers: {'Content-Type':'application/json'},
+  body: JSON.stringify({
+    routeId: 'ebf6d159-0c4a-4c08-bbcf-4c4960617b75', busId: 'c471963d-be7c-4b2b-a5d2-629d634809aa',
+    departureAt: new Date(Date.now() + 2*86400000).toISOString(),
+    price: 800
+  })
+}).then(r => r.json()).then(console.log)
+
+Promise {<pending>}[[Prototype]]: Promise[[PromiseState]]: "fulfilled"[[PromiseResult]]: undefined
+{id: 'f004b778-da42-4b0d-b350-15e7aa723ebb', tenantId: '92810a51-1af9-498a-9e4b-0aaf318be09f', createdAt: '2026-08-22T23:43:32.182213300Z', routeId: 'ebf6d159-0c4a-4c08-bbcf-4c4960617b75', busId: 'c471963d-be7c-4b2b-a5d2-629d634809aa', …}arrivalAt: nullbusId: "c471963d-be7c-4b2b-a5d2-629d634809aa"createdAt: "2026-08-22T23:43:32.182213300Z"departureAt: "2026-08-24T23:43:32.039Z"id: "f004b778-da42-4b0d-b350-15e7aa723ebb"price: 800routeId: "ebf6d159-0c4a-4c08-bbcf-4c4960617b75"status: "scheduled"tenantId: "92810a51-1af9-498a-9e4b-0aaf318be09f"[[Prototype]]: Object
+
+
+
+
+

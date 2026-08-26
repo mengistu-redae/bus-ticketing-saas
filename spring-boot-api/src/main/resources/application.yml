@@ -1,0 +1,101 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: bus-ticketing-api
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/bus_ticketing}
+    username: ${SPRING_DATASOURCE_USERNAME:bustix}
+    password: ${SPRING_DATASOURCE_PASSWORD:bustix}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate # schema is owned by Flyway migrations, not Hibernate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/bustix}
+
+# Custom app settings.
+bustix:
+  tenant:
+    # Claim in the Keycloak access token that carries the organization id for
+    # staff (operator_admin / agent) tokens. VERIFY THIS against a real token
+    # after logging in through Keycloak - the exact claim name for the
+    # Organizations feature can differ by Keycloak version. Decode a token at
+    # https://jwt.io or use the Admin Console's "Evaluate" tab to confirm,
+    # then adjust this one property rather than any code.
+    org-claim-path: organization
+  seat-lock:
+    ttl-seconds: 300
+  ticketing:
+    # Applied to a booking's subtotal (seat count x trip price) to get
+    # tax_amount - see BookingWriter. Ethiopia's standard VAT rate; make
+    # this operator-configurable if/when a non-Ethiopian operator ever
+    # onboards, not needed for v1.
+    vat-rate: 0.15
+    # A ticket's "reporting time" (when a passenger should be at the
+    # terminal) is derived, not stored - departure_at minus this buffer.
+    reporting-buffer-minutes: 30
+    reschedule:
+      # "Time Gate: ... evaluate Delta T >= 12 hours. If invalid, block the
+      # request and route to the refund engine" - see
+      # my-notes/ethiopian_bus_system_specs.md section 5.3.
+      min-notice-hours: 12
+      # "Platform Fee Engine: ... a static mutation fee mapping between
+      # 50.00 ETB and 100.00 ETB depending on channel tiers" - the BRD
+      # doesn't pin exact amounts per channel, so this session's mapping is
+      # self_service (customer, unassisted) = the lower end, counter
+      # (agent-assisted) = the higher end.
+      fee-self-service: 50.00
+      fee-counter: 100.00
+  cargo:
+    # Section 4.2's "Validation Engine ... parse cargo descriptions ...
+    # against a regex-supported blacklist" - platform-wide, not
+    # per-operator, same mechanism as ticketing.vat-rate above (see
+    # ProhibitedItemsChecker and my-notes/cargo_logistics_scope_v1.md
+    # decision 4). Each entry is compiled as a case-insensitive regex, so a
+    # plain word just matches as a substring.
+    prohibited-items:
+      - livestock
+      - goat
+      - sheep
+      - chicken
+      - flammable
+      - petrol
+      - weapon
+      - gun
+      - charcoal
+      - khat_commercial
+  keycloak-admin:
+    # Used only by PlatformController's "create operator" endpoint
+    # (platform_admin) to provision a new Keycloak Organization via the
+    # Admin REST API - the same two calls
+    # infra/keycloak/create-demo-org.sh makes by hand (master-realm
+    # admin-cli login, then POST .../organizations), just from the app.
+    # NOT the same as spring.security.oauth2.resourceserver.jwt.issuer-uri
+    # above - that one includes /realms/bustix and is used for JWT
+    # validation; this is the bare server URL, and always talks to the
+    # master realm's built-in admin-cli client regardless of bustix's own
+    # client config.
+    base-url: ${KEYCLOAK_ADMIN_BASE_URL:http://localhost:8080}
+    admin-username: ${KEYCLOAK_ADMIN:admin}
+    admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}

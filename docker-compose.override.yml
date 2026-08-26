@@ -1,0 +1,32 @@
+# Local-only override: this dev machine already runs a native Postgres on
+# 5432 (shared with other, unrelated projects), so we point Keycloak's
+# container at that host instance instead of compose's own postgres
+# service, and start it/redis with --no-deps so compose doesn't also try
+# to bring up the postgres/spring-boot-api/node-bff/nginx services.
+#
+# Not meant to be committed - it's specific to this machine's local infra.
+services:
+  keycloak:
+    environment:
+      # Dedicated DB for this project - NOT the pre-existing "keycloak" db
+      # on this shared instance, which turned out to belong to a different
+      # (incompatible) Keycloak version from another project.
+      KC_DB_URL: jdbc:postgresql://host.docker.internal:5432/bustix_keycloak
+      KC_DB_USERNAME: bustix
+      KC_DB_PASSWORD: bustix
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # nginx.conf (committed, unmodified) proxies to the Docker service names
+  # "node-bff:3000" and "keycloak:8080" - but on this machine both run
+  # natively on the host, not as compose services. extra_hosts here points
+  # those exact hostnames at host-gateway instead, so the container-side
+  # nginx.conf resolves them straight through to the host's native
+  # processes with zero changes to the committed config. Start with
+  # `docker compose up -d --no-deps nginx` (same --no-deps pattern as
+  # redis) so compose doesn't also try to bring up its own postgres/
+  # node-bff/keycloak services.
+  nginx:
+    extra_hosts:
+      - "node-bff:host-gateway"
+      - "keycloak:host-gateway"

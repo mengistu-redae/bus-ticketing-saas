@@ -1,0 +1,80 @@
+################################
+###  Full booking-to-cancellation flow verified
+################################
+
+
+## Book a seat as demo-customer
+
+1. Go to http://localhost:3000/auth/login, log in as demo-customer / changeme, set a new password when prompted (forced reset on first login).
+2. You'll land back on localhost:3000. Open DevTools (F12) → Console tab — it needs to be a tab on the localhost:3000 origin so fetch sends your session cookie automatically.
+3. Run:
+fetch('/api/bookings', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    tripId: '4a89f23c-b530-4f85-b138-322c787c1196',
+    seatIds: ['ad33b711-c1cb-4958-9c14-467ffb9d07c5'],
+    idempotencyKey: 'manual-test-1'
+  })
+}).then(r => r.json()).then(console.log)
+
+4. Expect a 201-shaped JSON body with an id field — that's the booking id. Copy it.
+
+(Optional sanity check anytime: fetch('/auth/me').then(r=>r.json()).then(console.log) shows who the session thinks you are.)
+
+
+## Cancel the seat as demo-operator-admin — this is the actual test of today's fix
+
+1. Open a private/incognito window or in the same console, log out of the customer session first:
+fetch('/auth/logout', { method: 'Pref = '/auth/login')
+
+2. log in as demo-operator-admin / changeme, reset password when prompted.
+3. Back in the console, run (swap in the booking id from step 1.4):
+fetch('/api/bookings/<BOOKING_ID>/cancel', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ reason: 'manual smoke test' })
+}).then(r => r.json()).then(console.log)
+
+How to read the result:
+- Success → a JSON Cancellation object with a refundAmount (should be 500.00, 100% refund — the trip departs >24h out and we seeded that tier). This means TenantContext.require() resolved correctly — the org-claim fix works end-to-end.
+- Failure → an empty error body / 500, because TenantContext.require() throws IllegalStateException when it can't resolve a tenant, and CancellationController has no handler for that exception. If you see this, the org-claim fix didn't take — worth telling me so I can dig back in.
+
+
+#######################################
+########## RESULT  ####################
+#######################################
+
+fetch('/api/bookings', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    tripId: '4a89f23c-b530-4f85-b138-322c787c1196',
+    seatIds: ['ad33b711-c1cb-4958-9c14-467ffb9d07c5'],
+    idempotencyKey: 'manual-test-1'
+  })
+}).then(r => r.json()).then(console.log)
+
+Promise {<pending>}[[Prototype]]: Promise[[PromiseState]]: "fulfilled"[[PromiseResult]]: undefined
+{id: '8dcb0b77-3766-4e6d-a8da-47d0f46d33e0', tenantId: '92810a51-1af9-498a-9e4b-0aaf318be09f', createdAt: '2026-08-22T22:15:22.481207100Z', tripId: '4a89f23c-b530-4f85-b138-322c787c1196', customerUserId: '01471b88-ef40-4a35-8b0d-2e9c46e1c422', …}agentUserId: nullchannel: "self_service"createdAt: "2026-08-22T22:15:22.481207100Z"customerUserId: "01471b88-ef40-4a35-8b0d-2e9c46e1c422"id: "8dcb0b77-3766-4e6d-a8da-47d0f46d33e0"idempotencyKey: "manual-test-1"status: "confirmed"tenantId: "92810a51-1af9-498a-9e4b-0aaf318be09f"totalAmount: 500tripId: "4a89f23c-b530-4f85-b138-322c787c1196"[[Prototype]]: Object
+
+============ 
+
+fetch('/auth/me').then(r=>r.json()).then(console.log)
+
+Promise {<pending>}[[Prototype]]: Promise[[PromiseState]]: "fulfilled"[[PromiseResult]]: undefined
+{authenticated: true, user: {…}}authenticated: trueuser: acr: "1"at_hash: "Hg7ils1BaRBCs-oYu2xtPw"aud: "bus-ticketing-bff"auth_time: 1787436744azp: "bus-ticketing-bff"email: "customer@example.com"email_verified: trueexp: 1787437044family_name: "demo"given_name: "customer"iat: 1787436744iss: "http://localhost:8080/realms/bustix"jti: "b3d0764d-a265-556f-e15c-79129c9fa9c1"name: "customer demo"nonce: "bX9Rsdrk0zRjAUwjtEaiiBdzMVno3co0VQKV5dvs3Ws"preferred_username: "demo-customer"sid: "OcH5YssVlJyb3mbIS2iGrqw3"sub: "3b7c42c6-b506-4e52-ba28-a5224fd4c601"typ: "ID"[[Prototype]]: Objectconstructor: ƒ Object()hasOwnProperty: ƒ hasOwnProperty()isPrototypeOf: ƒ isPrototypeOf()propertyIsEnumerable: ƒ propertyIsEnumerable()toLocaleString: ƒ toLocaleString()toString: ƒ toString()valueOf: ƒ valueOf()__defineGetter__: ƒ __defineGetter__()__defineSetter__: ƒ __defineSetter__()__lookupGetter__: ƒ __lookupGetter__()__lookupSetter__: ƒ __lookupSetter__()__proto__: (...)get __proto__: ƒ __proto__()set __proto__: ƒ __proto__()[[Prototype]]: Object
+
+============
+
+fetch('/api/bookings/8dcb0b77-3766-4e6d-a8da-47d0f46d33e0/cancel', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ reason: 'manual smoke test' })
+}).then(r => r.json()).then(console.log)
+
+Promise {<pending>}[[Prototype]]: Promise[[PromiseState]]: "fulfilled"[[PromiseResult]]: undefined
+{id: '2946ce16-50ee-45c2-a4fa-795fbf1e0adf', bookingId: '8dcb0b77-3766-4e6d-a8da-47d0f46d33e0', cancelledBy: '2d846df9-f680-491e-b745-b6b786403485', reason: 'manual smoke test', refundAmount: 250, …}bookingId: "8dcb0b77-3766-4e6d-a8da-47d0f46d33e0"cancelledBy: "2d846df9-f680-491e-b745-b6b786403485"id: "2946ce16-50ee-45c2-a4fa-795fbf1e0adf"reason: "manual smoke test"refundAmount: 250refundedAt: "2026-08-22T22:36:34.375123900Z"[[Prototype]]: Object
+
+
+

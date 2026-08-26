@@ -1,0 +1,60 @@
+{
+  "realm": "bustix",
+  "enabled": true,
+  "organizationsEnabled": true,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "sslRequired": "external",
+  "roles": {
+    "realm": [
+      { "name": "platform_admin", "description": "Anthropic-style SaaS operator staff, onboards bus operators" },
+      { "name": "operator_admin", "description": "Manages one bus operator's fleet, routes, schedules and staff" },
+      { "name": "agent", "description": "Operator counter/agent staff, books and refunds on behalf of walk-in customers" },
+      { "name": "customer", "description": "Self-service customer, not tied to any single operator" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "bus-ticketing-bff",
+      "name": "Bus ticketing BFF",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "demo-operator-admin",
+      "email": "admin@demobus.example",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "changeme", "temporary": true }
+      ],
+      "realmRoles": ["operator_admin"]
+    },
+    {
+      "username": "demo-customer",
+      "email": "customer@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "changeme", "temporary": true }
+      ],
+      "realmRoles": ["customer"]
+    }
+  ]
+}

@@ -1,0 +1,541 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiDelete, apiGet, apiGetWithCount, apiPatch, apiPost } from './client.js';
+
+// ---- auth ----
+
+export function useAuthMe() {
+  return useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn: async () => {
+      try {
+        return await apiGet('/auth/me');
+      } catch (err) {
+        // /auth/me itself returning 401 is an expected "not logged in"
+        // state, not an error to retry or redirect on - every other /api
+        // call redirects on 401 (see api/client.js), this one is the
+        // exception since it's how the app finds out it's logged out.
+        if (err.status === 401) {
+          return { authenticated: false };
+        }
+        throw err;
+      }
+    },
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- trips (marketplace) ----
+
+export function useTripSearch({ origin, destination, departureAfter, page = 0, size = 20 }, enabled) {
+  const params = new URLSearchParams({ origin, destination, page: String(page), size: String(size) });
+  if (departureAfter) params.set('departureAfter', departureAfter);
+
+  return useQuery({
+    queryKey: ['trips', 'search', origin, destination, departureAfter, page, size],
+    queryFn: () => apiGetWithCount(`/api/trips/search?${params.toString()}`),
+    enabled: Boolean(enabled && origin && destination),
+  });
+}
+
+// Backs the From/To autocomplete dropdown (LocationAutocomplete) - the
+// component itself debounces keystrokes before this ever fires, so no
+// debouncing here; query is disabled below 2 characters, matching the
+// backend's own floor (TripController.locations) so an empty/near-empty
+// query never round-trips at all.
+export function useLocationSuggestions(query) {
+  const trimmed = (query ?? '').trim();
+  return useQuery({
+    queryKey: ['trips', 'locations', trimmed],
+    queryFn: () => apiGet(`/api/trips/locations?query=${encodeURIComponent(trimmed)}`),
+    enabled: trimmed.length >= 2,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useTrip(tripId) {
+  return useQuery({
+    queryKey: ['trips', tripId],
+    queryFn: () => apiGet(`/api/trips/${tripId}`),
+    enabled: Boolean(tripId),
+  });
+}
+
+export function useTripSeats(tripId) {
+  return useQuery({
+    queryKey: ['trips', tripId, 'seats'],
+    queryFn: () => apiGet(`/api/trips/${tripId}/seats`),
+    enabled: Boolean(tripId),
+  });
+}
+
+// ---- bookings ----
+
+/**
+ * Shared by both booking channels - spring-boot-api decides self_service vs
+ * counter from the caller's JWT role, not from anything in this payload
+ * (see BookingController). `passengers` is a list of
+ * {seatId, passengerName, passengerPhone?, passengerIdNumber?, passengerIdType?} -
+ * changed 2026-08-24 from a bare seatIds array, since a real ticket is
+ * issued to a named passenger per seat (see spring-boot-api's
+ * CreateBookingRequest.PassengerSeat).
+ */
+export function useCreateBooking() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tripId, passengers, idempotencyKey }) =>
+      apiPost('/api/bookings', { tripId, passengers, idempotencyKey }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['agent-bookings'] });
+    },
+  });
+}
+
+/**
+ * No account, no session - a visitor books with contact info instead of an
+ * identity (see spring-boot-api's BookingController.createGuestBooking).
+ * `contactPhone` is required (E.164 Ethiopian, same pattern used elsewhere)
+ * since it's also the second factor for useTrackBooking below;
+ * `contactEmail` is optional and only used for the confirmation email.
+ * Deliberately not the same hook as useCreateBooking above - the request
+ * shape/endpoint genuinely differ, same "one hook per access pattern" the
+ * rest of this file already follows (useCancelMyBooking vs
+ * useCancelBooking, etc).
+ */
+export function useCreateGuestBooking() {
+  return useMutation({
+    mutationFn: ({ tripId, passengers, idempotencyKey, contactPhone, contactEmail }) =>
+      apiPost('/api/bookings/guest', { tripId, passengers, idempotencyKey, contactPhone, contactEmail }),
+  });
+}
+
+// ---- public booking tracking (no login - see node-bff/src/routes/api.js's
+// permitAll carve-out for this path, same shape as useTrackWaybill below) ----
+
+export function useTrackBooking(bookingRef, phone) {
+  return useQuery({
+    queryKey: ['bookings', 'track', bookingRef, phone],
+    queryFn: () => apiGet(`/api/bookings/guest/track/${encodeURIComponent(bookingRef)}?phone=${encodeURIComponent(phone)}`),
+    enabled: Boolean(bookingRef && phone),
+    retry: false,
+  });
+}
+
+export function useMyBookings() {
+  return useQuery({
+    queryKey: ['my-bookings'],
+    queryFn: () => apiGet('/api/my-bookings'),
+  });
+}
+
+export function useMyBooking(bookingId) {
+  return useQuery({
+    queryKey: ['my-bookings', bookingId],
+    queryFn: () => apiGet(`/api/my-bookings/${bookingId}`),
+    enabled: Boolean(bookingId),
+  });
+}
+
+export function useMyBookingSeats(bookingId) {
+  return useQuery({
+    queryKey: ['my-bookings', bookingId, 'seats'],
+    queryFn: () => apiGet(`/api/my-bookings/${bookingId}/seats`),
+    enabled: Boolean(bookingId),
+  });
+}
+
+export function useCancelMyBooking(bookingId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (reason) => apiPost(`/api/my-bookings/${bookingId}/cancel`, reason ? { reason } : undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['my-bookings', bookingId] });
+    },
+  });
+}
+
+/**
+ * v1 only supports single-seat bookings (see spring-boot-api's
+ * BookingRescheduleService) - {newTripId, newSeatId}, not a list. Blocked
+ * server-side with a 409 if less than 12h notice remains before the
+ * *current* trip's departure (my-notes/ethiopian_bus_system_specs.md
+ * section 5.3's "Time Gate") - the caller is expected to cancel instead.
+ */
+export function useRescheduleMyBooking(bookingId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ newTripId, newSeatId }) => apiPost(`/api/my-bookings/${bookingId}/reschedule`, { newTripId, newSeatId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['my-bookings', bookingId] });
+    },
+  });
+}
+
+// ---- staff (agent/operator_admin) bookings ----
+// GET /api/bookings(/{id})(/seats) - tenant-scoped, added 2026-08-24
+// alongside the passenger/ticket fields; previously nothing exposed a
+// staff-facing way to look up bookings at all. Kept as a separate
+// 'agent-bookings' query key rather than reusing 'my-bookings', which is
+// ownership-scoped to the customer's own bookings, a different thing.
+
+export function useAgentBookings() {
+  return useQuery({
+    queryKey: ['agent-bookings'],
+    queryFn: () => apiGet('/api/bookings'),
+  });
+}
+
+export function useAgentBooking(bookingId) {
+  return useQuery({
+    queryKey: ['agent-bookings', bookingId],
+    queryFn: () => apiGet(`/api/bookings/${bookingId}`),
+    enabled: Boolean(bookingId),
+  });
+}
+
+export function useAgentBookingSeats(bookingId) {
+  return useQuery({
+    queryKey: ['agent-bookings', bookingId, 'seats'],
+    queryFn: () => apiGet(`/api/bookings/${bookingId}/seats`),
+    enabled: Boolean(bookingId),
+  });
+}
+
+/** The staff cancellation path (POST /api/bookings/{id}/cancel) - tenant-scoped, not the customer's ownership-scoped one. */
+export function useCancelBooking(bookingId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (reason) => apiPost(`/api/bookings/${bookingId}/cancel`, reason ? { reason } : undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['agent-bookings', bookingId] });
+    },
+  });
+}
+
+/** Staff path - see useRescheduleMyBooking for the shared v1 shape/limitations. */
+export function useRescheduleBooking(bookingId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ newTripId, newSeatId }) => apiPost(`/api/bookings/${bookingId}/reschedule`, { newTripId, newSeatId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['agent-bookings', bookingId] });
+    },
+  });
+}
+
+/** Gate check-in - staff-only, see spring-boot-api's BoardingService for the identity-match/gate-lockout rules. */
+export function useCheckIn(bookingId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ seatId, presentedIdNumber }) =>
+      apiPost(`/api/bookings/${bookingId}/seats/${seatId}/check-in`, { presentedIdNumber }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-bookings', bookingId, 'seats'] });
+    },
+  });
+}
+
+// ---- payments (recorded against a booking by staff) ----
+
+export function usePayments(bookingId) {
+  return useQuery({
+    queryKey: ['agent-bookings', bookingId, 'payments'],
+    queryFn: () => apiGet(`/api/bookings/${bookingId}/payments`),
+    enabled: Boolean(bookingId),
+  });
+}
+
+export function useCreatePayment(bookingId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ method, amount, transactionId }) =>
+      apiPost(`/api/bookings/${bookingId}/payments`, { method, amount, transactionId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-bookings', bookingId, 'payments'] });
+    },
+  });
+}
+
+// ---- operator_admin fleet management (buses/routes/trips/refund-policies) ----
+// All tenant-scoped via TenantContext server-side, OPERATOR_ADMIN-only.
+// Mutations return the mutated resource (spring-boot-api's convention
+// throughout, not just here), so no separate invalidate-then-refetch is
+// needed for the single-resource case, but the list is still invalidated
+// since a list view needs to pick up the change too.
+
+export function useFleetBuses() {
+  return useQuery({ queryKey: ['fleet', 'buses'], queryFn: () => apiGet('/api/fleet/buses') });
+}
+
+export function useCreateBus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/fleet/buses', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'buses'] }),
+  });
+}
+
+export function useUpdateBus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ busId, ...body }) => apiPatch(`/api/fleet/buses/${busId}`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'buses'] }),
+  });
+}
+
+export function useFleetRoutes() {
+  return useQuery({ queryKey: ['fleet', 'routes'], queryFn: () => apiGet('/api/fleet/routes') });
+}
+
+export function useCreateRoute() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/fleet/routes', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'routes'] }),
+  });
+}
+
+export function useUpdateRoute() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ routeId, ...body }) => apiPatch(`/api/fleet/routes/${routeId}`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'routes'] }),
+  });
+}
+
+export function useFleetTrips() {
+  return useQuery({ queryKey: ['fleet', 'trips'], queryFn: () => apiGet('/api/fleet/trips') });
+}
+
+export function useCreateTrip() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/fleet/trips', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'trips'] }),
+  });
+}
+
+export function useUpdateTrip() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tripId, ...body }) => apiPatch(`/api/fleet/trips/${tripId}`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'trips'] }),
+  });
+}
+
+/** Sets a trip's status to cancelled - see TripController.cancel's javadoc on why this isn't a row delete. */
+export function useCancelTrip() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (tripId) => apiDelete(`/api/fleet/trips/${tripId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'trips'] }),
+  });
+}
+
+export function useRefundPolicies() {
+  return useQuery({ queryKey: ['fleet', 'refund-policies'], queryFn: () => apiGet('/api/fleet/refund-policies') });
+}
+
+export function useCreateRefundPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/fleet/refund-policies', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'refund-policies'] }),
+  });
+}
+
+export function useUpdateRefundPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ policyId, tiers }) => apiPatch(`/api/fleet/refund-policies/${policyId}`, { tiers }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'refund-policies'] }),
+  });
+}
+
+/** Real delete, not a soft-deactivate - see RefundPolicyController's javadoc on why that's safe here. */
+export function useDeleteRefundPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (policyId) => apiDelete(`/api/fleet/refund-policies/${policyId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'refund-policies'] }),
+  });
+}
+
+// ---- cargo waybills (agent/operator_admin, tenant-scoped) ----
+// /api/cargo/waybills(/{id})(/dispatch|arrive|collect|cancel) - staff-only,
+// see com.bustix.cargo.CargoWaybillController. Mutations return the
+// mutated waybill (same convention as fleet endpoints), but the list is
+// still invalidated since a list view needs to pick up status changes too.
+
+export function useWaybills({ tripId, status } = {}) {
+  const params = new URLSearchParams();
+  if (tripId) params.set('tripId', tripId);
+  if (status) params.set('status', status);
+  const query = params.toString();
+  return useQuery({
+    queryKey: ['cargo', 'waybills', tripId || null, status || null],
+    queryFn: () => apiGet(`/api/cargo/waybills${query ? `?${query}` : ''}`),
+  });
+}
+
+export function useWaybill(waybillId) {
+  return useQuery({
+    queryKey: ['cargo', 'waybills', waybillId],
+    queryFn: () => apiGet(`/api/cargo/waybills/${waybillId}`),
+    enabled: Boolean(waybillId),
+  });
+}
+
+export function useCreateWaybill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/cargo/waybills', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cargo', 'waybills'] }),
+  });
+}
+
+/** PATCH - physical-shipment fields 409 once status != "issued" (see CargoWaybillService.update); paymentStatus is exempt from that freeze. */
+export function useUpdateWaybill(waybillId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPatch(`/api/cargo/waybills/${waybillId}`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cargo', 'waybills'] });
+      queryClient.invalidateQueries({ queryKey: ['cargo', 'waybills', waybillId] });
+    },
+  });
+}
+
+function useWaybillLifecycleAction(waybillId, action) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost(`/api/cargo/waybills/${waybillId}/${action}`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cargo', 'waybills'] });
+      queryClient.invalidateQueries({ queryKey: ['cargo', 'waybills', waybillId] });
+    },
+  });
+}
+
+export function useDispatchWaybill(waybillId) {
+  return useWaybillLifecycleAction(waybillId, 'dispatch');
+}
+
+export function useArriveWaybill(waybillId) {
+  return useWaybillLifecycleAction(waybillId, 'arrive');
+}
+
+/** {presentedIdNumber} - checked against consigneeIdNumber on file, 409 on mismatch (see ConsigneeIdentityMismatchException). */
+export function useCollectWaybill(waybillId) {
+  return useWaybillLifecycleAction(waybillId, 'collect');
+}
+
+/** Pre-dispatch only - reuses the same refund_policies an operator configures for passenger bookings. */
+export function useCancelWaybill(waybillId) {
+  return useWaybillLifecycleAction(waybillId, 'cancel');
+}
+
+// ---- cargo rates (operator_admin) ----
+// /api/fleet/cargo-rates - same shape as refund-policies above, including
+// route_id nullable = operator-wide default. Real delete, not
+// soft-deactivate (same reasoning as refund policies).
+
+export function useCargoRates() {
+  return useQuery({ queryKey: ['fleet', 'cargo-rates'], queryFn: () => apiGet('/api/fleet/cargo-rates') });
+}
+
+export function useCreateCargoRate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/fleet/cargo-rates', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'cargo-rates'] }),
+  });
+}
+
+export function useUpdateCargoRate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rateId, ...body }) => apiPatch(`/api/fleet/cargo-rates/${rateId}`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'cargo-rates'] }),
+  });
+}
+
+export function useDeleteCargoRate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (rateId) => apiDelete(`/api/fleet/cargo-rates/${rateId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'cargo-rates'] }),
+  });
+}
+
+// ---- a logged-in customer's own shipment history ----
+// /api/my-shipments(/{id}) - the cargo counterpart to useMyBookings above.
+// Scoped through waybills attached to a booking the customer owns; a
+// standalone staff-created waybill with no bookingId never appears here -
+// see CargoWaybillRepository.findAllByBookingCustomerUserId.
+
+export function useMyShipments() {
+  return useQuery({ queryKey: ['my-shipments'], queryFn: () => apiGet('/api/my-shipments') });
+}
+
+export function useMyShipment(waybillId) {
+  return useQuery({
+    queryKey: ['my-shipments', waybillId],
+    queryFn: () => apiGet(`/api/my-shipments/${waybillId}`),
+    enabled: Boolean(waybillId),
+  });
+}
+
+// ---- public cargo tracking (no login - see node-bff/src/routes/api.js's
+// permitAll carve-out for this one path) ----
+
+export function useTrackWaybill(waybillNumber, phone) {
+  return useQuery({
+    queryKey: ['cargo', 'track', waybillNumber, phone],
+    queryFn: () => apiGet(`/api/cargo/track/${encodeURIComponent(waybillNumber)}?phone=${encodeURIComponent(phone)}`),
+    enabled: Boolean(waybillNumber && phone),
+    retry: false,
+  });
+}
+
+// ---- platform_admin operator onboarding ----
+// /api/platform/operators - cross-tenant by nature (PlatformController
+// manages operators themselves, not anything scoped within one). POST
+// provisions a real Keycloak Organization via the admin API first, then
+// inserts the local row - see OperatorProvisioningService's javadoc for
+// why there's no compensating rollback if the second step fails. DELETE
+// soft-deactivates (status='inactive') with no reactivate endpoint - see
+// PlatformController.deactivate's javadoc.
+
+export function usePlatformOperators() {
+  return useQuery({ queryKey: ['platform', 'operators'], queryFn: () => apiGet('/api/platform/operators') });
+}
+
+export function useCreateOperator() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/platform/operators', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['platform', 'operators'] }),
+  });
+}
+
+export function useUpdateOperator() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ operatorId, ...body }) => apiPatch(`/api/platform/operators/${operatorId}`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['platform', 'operators'] }),
+  });
+}
+
+export function useDeactivateOperator() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (operatorId) => apiDelete(`/api/platform/operators/${operatorId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['platform', 'operators'] }),
+  });
+}

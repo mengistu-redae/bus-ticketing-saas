@@ -1,0 +1,17 @@
+# Test-only overrides layered on top of src/main/resources/application.yml.
+#
+# jwk-set-uri here is never actually fetched (AbstractIntegrationTest's
+# NoNetworkJwtDecoderConfig replaces the JwtDecoder bean outright), but
+# setting *some* jwk-set-uri is what stops Spring Boot's resource-server
+# autoconfiguration from instead building a decoder off issuer-uri, which -
+# unlike jwk-set-uri - resolves eagerly via a real HTTP call to
+# .well-known/openid-configuration at context-startup time
+# (JwtDecoders.fromIssuerLocation). Without this, tests would try to reach
+# the real KEYCLOAK_ISSUER_URI (localhost:8080) and either hang or fail on a
+# machine/CI runner with no Keycloak running.
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://unused.invalid/protocol/openid-connect/certs

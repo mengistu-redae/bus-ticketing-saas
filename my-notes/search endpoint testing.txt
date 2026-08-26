@@ -1,0 +1,58 @@
+##########################
+## testing the search endpoint  
+##########################
+
+test both from the browser console (through node-bff's /api proxy, using your existing session).
+
+1. Search — as demo-customer (expect success)
+
+Log in first at http://localhost:3000/auth/login 
+
+Then in the console:
+
+fetch('/api/trips/search?origin=Addis%20Ababa&destination=Hawassa')
+  .then(r => r.json()).then(console.log)
+
+Expect a 200 with an array containing the seeded trip (Addis Ababa → Hawassa, availableSeats: 10 since the earlier booking was cancelled and freed back up).
+
+2. Confirm the role check now actually works — as demo-operator-admin (expect blocked)
+
+In your other (incognito) tab, logged in as demo-operator-admin / changeme123:
+
+fetch('/api/trips/search?origin=Addis%20Ababa&destination=Hawassa')
+  .then(r => { console.log('status:', r.status); return r.json(); })
+  .then(console.log)
+  .catch(console.error)
+
+This is the important one. Before today's @EnableMethodSecurity fix, operator_admin (which has neither CUSTOMER nor AGENT) would have gotten through anyway, since @PreAuthorize was silently inert everywhere in the app. Expect 403 now. If you get 200 instead, the security fix didn't take — tell me and I'll dig back in.
+
+
+
+##########################
+## result 
+##########################
+
+fetch('/api/trips/search?origin=Addis%20Ababa&destination=Hawassa')
+  .then(r => r.json()).then(console.log)
+  
+Promise {<pending>}[[Prototype]]: Promise[[PromiseState]]: "fulfilled"[[PromiseResult]]: undefined
+[{…}]0: {tripId: '4a89f23c-b530-4f85-b138-322c787c1196', operatorId: '92810a51-1af9-498a-9e4b-0aaf318be09f', operatorName: 'Demo Bus Co', origin: 'Addis Ababa', destination: 'Hawassa', …}length: 1[[Prototype]]: Array(0)
+
+===========
+
+fetch('/api/trips/search?origin=Addis%20Ababa&destination=Hawassa')
+  .then(r => { console.log('status:', r.status); return r.json(); })
+  .then(console.log)
+  .catch(console.error)
+  
+Promise {<pending>}
+VM109:1 
+ GET http://localhost:3000/api/trips/search?origin=Addis%20Ababa&destination=Hawassa 403 (Forbidden)
+(anonymous)	@	VM109:1
+VM109:2 status: 403
+SyntaxError: Failed to execute 'json' on 'Response': Unexpected end of JSON input (at VM110:1:1)
+    at <anonymous>:2:59
+Promise.catch		
+(anonymous)	@	VM109:4
+
+
