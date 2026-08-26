@@ -11,6 +11,7 @@ import {
 } from '../../api/queries.js';
 import { ApiError } from '../../api/client.js';
 import StatusPill from '../../components/StatusPill.jsx';
+import BoardingPassQr from '../../components/BoardingPassQr.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import ErrorBanner from '../../components/ErrorBanner.jsx';
 import { formatCurrency, formatDateTime } from '../../lib/format.js';
@@ -215,6 +216,20 @@ export default function AgentBookingDetail() {
               ))}
             </div>
             {checkInError && <div className="mt-3"><ErrorBanner message={checkInError} /></div>}
+          </div>
+        )}
+
+        {seats && seats.length > 0 && status !== 'cancelled' && (
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <dt className="mb-2 text-sm text-ink-muted">Boarding pass{seats.length > 1 ? 'es' : ''}</dt>
+            <div className="flex flex-wrap gap-4">
+              {seats.map((s) => (
+                <div key={s.seatId} className="flex flex-col items-center gap-1">
+                  <BoardingPassQr bookingId={booking.id} seatId={s.seatId} />
+                  <span className="font-mono text-xs text-ink-muted">{s.seatNo}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
