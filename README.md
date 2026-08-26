@@ -1,5 +1,7 @@
 # Bus Ticketing SaaS
 
+[![GitHub repo](https://img.shields.io/badge/GitHub-bus--ticketing--saas-blue?logo=github)](https://github.com/mengistu-redae/bus-ticketing-saas)
+
 A multi-tenant bus ticketing platform: bus operators (tenants) manage their
 own fleet, routes and trips; customers search and book across every operator
 on the platform; operator staff can also book and cancel on behalf of
