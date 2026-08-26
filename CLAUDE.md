@@ -735,6 +735,160 @@ leftover state (the pre-existing operator-wide cargo rate used for this
 was left untouched; a duplicate one created by mistake mid-session was
 deleted again the same session).
 
+## Operator status enforcement
+
+Added 2026-08-26, closing one of the two items the "Known gaps" section
+used to flag: `operators.status` (set by `PlatformController.deactivate`)
+was never read anywhere. Scope was deliberately narrowed to
+**booking-time-only** (confirmed with the user before building, one of
+several explicit scoping choices this session): `BookingService.createBooking`
+- the single method both `POST /api/bookings` and `POST /api/bookings/guest`
+funnel through - looks up the trip's `Operator` (`trip.getTenantId()` is
+directly the operator id, no join needed) right after resolving the trip,
+before the idempotency check or any Redis seat-lock, and throws a new
+`OperatorInactiveException` (409, `BookingController`) if
+`!"active".equals(operator.getStatus())`. Deliberately **not** extended to
+`TenantContextFilter` (staff login) or `TripController.search` (marketplace
+search) - a deactivated operator's trips still show up in search, and its
+staff can still log in; only the final booking call is blocked. This is a
+known, intentional residual gap, not an oversight: a customer can search,
+pick a seat, and only discover the operator isn't accepting bookings at the
+last step. Verified live: deactivated the demo operator, confirmed both an
+authenticated counter booking and a guest booking against its trip 409
+with the seat never actually locked, confirmed search still lists the
+trip, reactivated, confirmed booking succeeds again.
+
+## Cargo module: multi-item waybills, payments ledger, customer-initiated requests
+
+Added 2026-08-26, closing the three gaps `my-notes/cargo_logistics_scope_v1.md`
+had explicitly deferred from the original Cargo & Logistics Module session
+(see that section above). All three were scoped via `AskUserQuestion`
+before implementing, same as every other design fork in this app's history.
+
+**Multi-item waybills** (`V9__cargo_waybill_line_items.sql`): a new
+`cargo_waybill_items` table - each row its own `description`/`quantity`/
+`declaredValue`/`grossWeightKg` - replaces the old flat fields directly on
+`cargo_waybills`. `description` survives on the waybill itself only as an
+optional shipment-level summary (nullable now); `quantity` is dropped
+entirely (not meaningful summed across heterogeneous items);
+`grossWeightKg`/`declaredValue`/every pricing column stay in shape but are
+now snapshotted **sums** of the item rows at write time, computed by a new
+`CargoWaybillItem`/`CargoWaybillItemRepository` pair - the pricing formula
+in `CargoWaybillService.calculatePricing` itself is unchanged, it's just
+fed the item-sum instead of one flat request field. `CreateWaybillRequest`/
+`UpdateWaybillRequest` take an `items: List<ItemRequest>` (`@NotEmpty` on
+create; nullable-and-replace-the-whole-set on update, since PATCH null
+means "don't touch" and an *explicit* empty list is rejected via a new
+`InvalidWaybillItemsException`, 400). Existing waybills were backfilled
+one item row each from their old flat columns, in the same migration,
+before those columns were dropped/relaxed. Since `CargoWaybill` carries no
+JPA relation to its items (this codebase never maps cross-entity
+relations, always plain UUID FKs + explicit repository queries), every
+`CargoWaybillController` read/write endpoint - including
+`GET /api/my-shipments(/{id})` - now returns a new `WaybillWithItems`
+wrapper (`{waybill, items}`) instead of a bare `CargoWaybill`, the same
+purpose-built-read-shape role `WaybillTrackingView` already played for the
+public track endpoint. Frontend: a new shared
+`components/WaybillItemsEditor.jsx` (add/remove-item-rows), used by both
+`pages/cargo/Waybills.jsx`'s create form and `WaybillDetail.jsx`'s
+pre-dispatch edit form.
+
+**Payments ledger** (`V10__cargo_payments.sql`): reuses the real
+`payments` table instead of a parallel one - a new nullable
+`payments.waybill_id`, `booking_id` relaxed to nullable, and a
+`chk_payments_exactly_one_owner` CHECK (`(booking_id IS NOT NULL) <>
+(waybill_id IS NOT NULL)`) enforced at the DB level, not just application
+code. New `com.bustix.cargo.CargoPaymentController` at
+`/api/cargo/waybills/{waybillId}/payments(/{id})` - a **separate**
+controller from `PaymentController`, since that one's `@RequestMapping`
+base path is hard-coded to `/api/bookings/{bookingId}/payments`, a
+different resource nesting - reusing the existing `CreatePaymentRequest`/
+`UpdatePaymentRequest`/`Payment` entity as-is, same `requireOwnedX` →
+`findOwnedPayment` resolution shape as every other tenant-scoped-through-
+its-parent controller in this app. No `DELETE`, same "a payment is a
+financial fact, not soft-deletable" rule `PaymentController` already
+follows. Frontend: `WaybillDetail.jsx` gained a Payments section copied
+directly from `pages/agent/BookingDetail.jsx`'s existing "collected of
+total" pattern.
+
+**Customer-initiated requests** (`V11__customer_cargo_requests.sql`): a
+two-phase flow, since a shipment has to be physically weighed at a
+counter - a customer can't issue a fully-priced waybill themselves.
+`POST /api/my-shipments` (`CUSTOMER`, `CreateShipmentRequest` - no
+`tripId`, no pricing) creates a waybill with a new `status="requested"`,
+`tenantId`/`tripId` both null. Staff review it via a new
+`GET /api/cargo/requests` inbox (`CargoWaybillRepository.findAllByStatusAndTenantIdIsNull`
+- deliberately visible to **any** operator's staff until claimed, since a
+`requested` waybill has no tenant to scope by yet; v1 has no concept of
+"which operator should handle this" until a staff member picks a trip,
+flagged as an intentional cut, not per-operator routed) and turn one into
+a normal issued waybill via `POST /api/cargo/waybills/{id}/confirm-and-issue`
+(`ConfirmAndIssueWaybillRequest` - assigns the real trip, and therefore
+the tenant/operator too, the first point this waybill gets one; optionally
+overrides the consignee ID or re-weighs the items after physically
+inspecting the shipment; runs the same unchanged `calculatePricing`; flips
+`requested` → `issued`). Idempotent past `requested` - same convention as
+`dispatch`/`arrive`/`collect` - 409s via a new `RequestNotIssuableException`
+on anything out of order or still missing a consignee ID from both sides.
+`GET /api/my-shipments` now unions two ownership paths, not mutually
+exclusive: waybills attached to a booking the customer owns, and waybills
+they requested directly (`CargoWaybillRepository.findAllOwnedByCustomer`).
+
+**The one real convention-break in this whole session, done deliberately**:
+`CargoWaybill` no longer extends `BaseTenantEntity` - it declares its own
+`id`/`tenantId`/`createdAt` fields directly instead, same precedent as
+`AppUser` (nullable `tenantId`, doesn't extend it either) - since a
+`requested` waybill genuinely has no operator yet, but
+`BaseTenantEntity.tenantId` is `@Column(nullable = false)`. Flagged
+explicitly in `CargoWaybill`'s own javadoc rather than weakening that
+constraint for every other tenant-scoped entity in the app. Every existing
+derived-query repository method (`findByIdAndTenantId`, `findAllByTenantId`,
+etc.) kept working unchanged - those are just method names against a
+`tenantId` property that still exists, now declared locally instead of
+inherited.
+
+Frontend for the request flow: new `pages/customer/RequestShipment.jsx`
+(reuses `WaybillItemsEditor`, no trip picker - the customer may not know
+their bus yet), a "Request a shipment" entry point on
+`pages/customer/MyShipments.jsx` (previously had no create affordance at
+all), a "Pending staff review" banner on `MyShipmentDetail.jsx`. Staff
+`pages/cargo/Waybills.jsx` gained a pending-requests section; `WaybillDetail.jsx`
+swaps its normal action UI (dispatch/arrive/collect/cancel/payment-status)
+for a "Confirm and Issue" form (trip picker + consignee ID + a pre-filled
+items editor, auto-populated the first time a `requested` waybill loads
+via a one-time `useEffect`, the same lazy-init role `startEdit()` plays
+for the existing flat edit form) whenever `status === "requested"`.
+
+New test coverage across all three pieces - this module had **zero**
+automated tests before this session, only live/curl verification (see the
+original "Cargo & Logistics Module" section above): `CargoWaybillIntegrationTest`
+(multi-item create/price, empty-items 400, item-replace PATCH pre/post-
+dispatch), `CargoPaymentIntegrationTest` (cross-tenant 404, CHECK-constraint
+violation via a raw JDBC insert), `CustomerCargoRequestIntegrationTest`
+(request → confirm-and-issue round trip, role checks, idempotent
+re-confirm, missing-consignee-ID 409, cross-customer 404) - all compile,
+same Testcontainers-unrun-on-this-machine caveat as the rest of the suite
+(see "Known gaps" below).
+
+Verified live end-to-end against the real dev stack for all three pieces,
+not just `mvn compile`/`npm run build` (though both were clean throughout):
+`V9`/`V10`/`V11` each applied cleanly with every pre-existing waybill/payment
+row unaffected (backfilled correctly for `V9`, simply widened for `V10`/`V11`);
+a real 2-item waybill priced correctly by hand-computed aggregate weight;
+an item-replace PATCH re-pricing correctly and freezing post-dispatch
+while `paymentStatus` stayed exempt; two real payments (cash + telebirr
+with a txn id) recorded and listed against a waybill; a real `demo-customer`
+shipment request with no trip, showing up in `demo-agent`'s pending-requests
+inbox, correctly 409ing with no consignee ID then succeeding with one plus
+re-weighed items landing *exactly* on the free-weight threshold (0
+surcharge, confirming that boundary case specifically); an idempotent
+re-confirm; the inbox correctly emptying once the tenant was set; the full
+post-issue lifecycle completing normally with items intact throughout. No
+browser-based frontend verification was done this session for any of the
+three pieces - only `npm run build`, never exercised live in Chrome; worth
+doing before fully trusting the new UI (the items editor, payments
+section, request form, pending-requests inbox, confirm-and-issue form).
+
 ## Pricing
 
 v1 prices per trip, flat, regardless of seat (`trips.price`,
@@ -853,10 +1007,11 @@ claim and changing it would silently break tenant resolution for every
 existing staff login at that operator. `DELETE` reuses the `status` column
 `operators` already had since V1 (no migration needed, unlike buses/routes)
 to soft-deactivate rather than delete the row - an operator can have
-buses/routes/trips/bookings underneath it. Nothing currently reads `status`
-to actually block bookings or logins against a deactivated operator - that
-enforcement doesn't exist yet, a pre-existing gap, not newly introduced by
-this endpoint.
+buses/routes/trips/bookings underneath it. As of 2026-08-26,
+`BookingService.createBooking` reads `status` and blocks new bookings
+against a deactivated operator's trips (see "Operator status enforcement"
+below) - deliberately booking-time-only, not extended to staff login or
+marketplace search.
 
 `KeycloakOrganizationClient` is a plain `RestClient`, not the
 `org.keycloak:keycloak-admin-client` library - that library's own RESTEasy
@@ -1279,7 +1434,11 @@ actual user rather than through curl:**
   policy, don't hardcode them. The Cargo module itself was deliberately
   scoped narrower than the BRD's full section 3 - see
   `my-notes/cargo_logistics_scope_v1.md` and the "Cargo & Logistics
-  Module" section above for exactly what's built vs. still deferred (has
-  a full UI as of the same session, but still no multi-item waybills, no
-  `payments`-table integration, no customer-initiated creation) before
-  assuming any of that exists.
+  Module" section above for exactly what's built vs. still deferred at
+  that point. As of 2026-08-26 the three gaps that section's "explicitly
+  out of scope" list named - multi-item waybills, `payments`-table
+  integration, customer-initiated creation - are all built; see "Cargo
+  module: multi-item waybills, payments ledger, customer-initiated
+  requests" below. What's still genuinely missing: multi-item-per-waybill
+  is one flat item list per waybill, not nested/grouped sub-shipments; no
+  notification-outbox wiring for cargo status changes.
