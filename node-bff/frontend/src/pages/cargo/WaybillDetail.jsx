@@ -332,7 +332,10 @@ export default function WaybillDetail() {
               </div>
               <div>
                 <dt className="text-ink-muted">Weight</dt>
-                <dd className="text-ink">{waybill.grossWeightKg} kg ({waybill.excessWeightKg} kg over threshold)</dd>
+                <dd className="text-ink">
+                  {waybill.grossWeightKg} kg
+                  {waybill.excessWeightKg != null && ` (${waybill.excessWeightKg} kg over threshold)`}
+                </dd>
               </div>
               <div>
                 <dt className="text-ink-muted">Freight + surcharge + handling</dt>

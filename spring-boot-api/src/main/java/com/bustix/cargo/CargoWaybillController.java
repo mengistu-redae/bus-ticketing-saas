@@ -77,10 +77,22 @@ public class CargoWaybillController {
         return waybills.stream().map(this::withItems).toList();
     }
 
+    /**
+     * Tenant-scoped, with one deliberate exception: a still-"requested"
+     * waybill has no tenant yet (see CargoWaybill's own javadoc), so it's
+     * let through here too - any operator's staff needs to be able to open
+     * it from the pending-requests inbox (GET /api/cargo/requests) to
+     * review and confirm-and-issue it, the same "not yet scoped, visible to
+     * anyone until claimed" reasoning findAllByStatusAndTenantIdIsNull
+     * already uses for the list. Once issued, tenantId is set and this
+     * falls back to the normal same-tenant-only check.
+     */
     @GetMapping("/api/cargo/waybills/{waybillId}")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
     public WaybillWithItems get(@PathVariable UUID waybillId) {
-        CargoWaybill waybill = cargoWaybillRepository.findByIdAndTenantId(waybillId, TenantContext.require())
+        UUID tenantId = TenantContext.require();
+        CargoWaybill waybill = cargoWaybillRepository.findById(waybillId)
+                .filter(w -> w.getTenantId() == null || tenantId.equals(w.getTenantId()))
                 .orElseThrow(() -> new NoSuchElementException("Waybill not found: " + waybillId));
         return withItems(waybill);
     }

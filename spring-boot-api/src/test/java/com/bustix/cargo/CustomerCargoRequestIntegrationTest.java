@@ -98,6 +98,16 @@ class CustomerCargoRequestIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.waybill.id=='" + waybillId + "')]").exists());
 
+        // The staff single-waybill GET must also let a still-unclaimed
+        // ("requested", tenantId null) waybill through - found live in the
+        // browser: GET was still tenant-scoped via findByIdAndTenantId,
+        // 404ing on every request before it was ever confirmed-and-issued,
+        // even for the agent who'd go on to claim it.
+        mockMvc.perform(get("/api/cargo/waybills/" + waybillId)
+                        .with(asAgent("agent-1", operator.getKeycloakOrgId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.waybill.status").value("requested"));
+
         String confirmBody = """
                 { "tripId": "%s", "consigneeIdNumber": "CONFIRMED-ID" }
                 """.formatted(trip.getId());
