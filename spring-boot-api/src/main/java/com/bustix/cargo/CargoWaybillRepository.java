@@ -45,6 +45,34 @@ public interface CargoWaybillRepository extends JpaRepository<CargoWaybill, UUID
             + "OR w.bookingId IN (SELECT b.id FROM Booking b WHERE b.customerUserId = :customerUserId))")
     Optional<CargoWaybill> findByIdOwnedByCustomer(@Param("id") UUID id, @Param("customerUserId") UUID customerUserId);
 
+    // ---- dashboard aggregates (com.bustix.dashboard.DashboardService) ----
+
+    /** Operator/agent dashboard: waybills still in flight (issued/dispatched/arrived). */
+    long countByTenantIdAndStatusIn(UUID tenantId, java.util.Collection<String> statuses);
+
+    /** Pending customer shipment requests - no tenant yet, see this repo's findAllByStatusAndTenantIdIsNull below. */
+    long countByStatusAndTenantIdIsNull(String status);
+
+    /** platform_admin dashboard: in-flight waybills across every operator (excludes the tenant-less "requested" ones). */
+    long countByStatusInAndTenantIdNotNull(java.util.Collection<String> statuses);
+
+    /** Operator dashboard: freight billed on non-cancelled waybills issued in the window. */
+    @Query("SELECT COALESCE(SUM(w.totalCargoCost), 0) FROM CargoWaybill w "
+            + "WHERE w.tenantId = :tenantId AND w.status <> 'cancelled' AND w.createdAt >= :since")
+    java.math.BigDecimal sumCargoRevenueSince(@Param("tenantId") UUID tenantId, @Param("since") java.time.Instant since);
+
+    /** Prior-window freight total for the cargo-revenue delta - half-open [start, end). */
+    @Query("SELECT COALESCE(SUM(w.totalCargoCost), 0) FROM CargoWaybill w WHERE w.tenantId = :tenantId "
+            + "AND w.status <> 'cancelled' AND w.createdAt >= :start AND w.createdAt < :end")
+    java.math.BigDecimal sumCargoRevenueBetween(@Param("tenantId") UUID tenantId,
+                                                @Param("start") java.time.Instant start,
+                                                @Param("end") java.time.Instant end);
+
+    /** Operator dashboard cargo-status donut. Rows: [status (String), count (long)]. */
+    @Query("SELECT w.status, COUNT(w) FROM CargoWaybill w "
+            + "WHERE w.tenantId = :tenantId AND w.createdAt >= :since GROUP BY w.status")
+    List<Object[]> cargoStatusBreakdown(@Param("tenantId") UUID tenantId, @Param("since") java.time.Instant since);
+
     // Staff-facing pending-requests inbox (CargoWaybillController.pendingRequests)
     // - a "requested" waybill has no tenant yet (see CargoWaybill's own
     // javadoc), so it's invisible to the normal findAllByTenantId-scoped

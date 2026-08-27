@@ -25,6 +25,40 @@ export function useAuthMe() {
   });
 }
 
+// ---- dashboards (role landing pages) ----
+// GET /api/{operator,agent,platform,my}/dashboard - read-only aggregates,
+// one per role, see spring-boot-api's com.bustix.dashboard. Each is gated
+// server-side by @PreAuthorize; the frontend only calls the one matching the
+// signed-in role (see App.jsx's RoleHome / Home.jsx's customer block).
+
+export function useOperatorDashboard(period = '30d') {
+  return useQuery({
+    queryKey: ['dashboard', 'operator', period],
+    queryFn: () => apiGet(`/api/operator/dashboard?period=${period}`),
+    placeholderData: (prev) => prev, // keep the old view while a period switch refetches
+  });
+}
+
+export function useAgentDashboard() {
+  return useQuery({ queryKey: ['dashboard', 'agent'], queryFn: () => apiGet('/api/agent/dashboard') });
+}
+
+export function usePlatformDashboard(period = '30d') {
+  return useQuery({
+    queryKey: ['dashboard', 'platform', period],
+    queryFn: () => apiGet(`/api/platform/dashboard?period=${period}`),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useMyDashboard(enabled = true) {
+  return useQuery({
+    queryKey: ['dashboard', 'my'],
+    queryFn: () => apiGet('/api/my-dashboard'),
+    enabled,
+  });
+}
+
 // ---- trips (marketplace) ----
 
 export function useTripSearch({ origin, destination, departureAfter, page = 0, size = 20 }, enabled) {

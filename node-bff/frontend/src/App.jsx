@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext.jsx';
 import RequireRole from './auth/RequireRole.jsx';
@@ -15,6 +16,11 @@ import AgentSeatSelection from './pages/agent/SeatSelection.jsx';
 import AgentBookings from './pages/agent/Bookings.jsx';
 import AgentBookingDetail from './pages/agent/BookingDetail.jsx';
 import AgentReschedule from './pages/agent/Reschedule.jsx';
+import AgentDashboard from './pages/agent/Dashboard.jsx';
+// The operator/platform dashboards pull in Recharts (~+115KB gzip) - lazy so
+// it's only fetched for those two roles, not on the customer/guest first load.
+const OperatorDashboard = lazy(() => import('./pages/operator/Dashboard.jsx'));
+const PlatformDashboard = lazy(() => import('./pages/platform/Dashboard.jsx'));
 import OperatorBuses from './pages/operator/Buses.jsx';
 import OperatorRoutes from './pages/operator/Routes.jsx';
 import OperatorTrips from './pages/operator/Trips.jsx';
@@ -28,6 +34,34 @@ import TrackBooking from './pages/TrackBooking.jsx';
 import MyShipments from './pages/customer/MyShipments.jsx';
 import MyShipmentDetail from './pages/customer/MyShipmentDetail.jsx';
 import RequestShipment from './pages/customer/RequestShipment.jsx';
+
+/**
+ * "/" is role-aware: staff land on their own dashboard, everyone else
+ * (customer + logged-out guest) gets the marketplace search Home. Before
+ * this, every role landed on the customer search box. Real authorization is
+ * server-side on each dashboard endpoint (@PreAuthorize); this is UX routing
+ * only, same as RequireRole.
+ */
+function DashboardFallback() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-light border-t-brand" />
+    </div>
+  );
+}
+
+/** Wraps the lazily-loaded (Recharts-heavy) operator/platform dashboards. */
+function LazyDashboard({ children }) {
+  return <Suspense fallback={<DashboardFallback />}>{children}</Suspense>;
+}
+
+function RoleHome() {
+  const { hasRole } = useAuth();
+  if (hasRole('operator_admin')) return <LazyDashboard><OperatorDashboard /></LazyDashboard>;
+  if (hasRole('agent')) return <AgentDashboard />;
+  if (hasRole('platform_admin')) return <LazyDashboard><PlatformDashboard /></LazyDashboard>;
+  return <Home />;
+}
 
 function RootLayout() {
   const { isLoading, authenticated } = useAuth();
@@ -56,7 +90,38 @@ export default function App() {
   return (
     <Routes>
       <Route element={<RootLayout />}>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<RoleHome />} />
+        {/* Stable deep-links for the nav "Dashboard" entries - RoleHome
+            renders these at "/" too, but a bookmarkable path per role is
+            clearer and matches how the other staff sections are wired. */}
+        <Route
+          path="/operator/dashboard"
+          element={
+            <RequireRole role="operator_admin">
+              <LazyDashboard>
+                <OperatorDashboard />
+              </LazyDashboard>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/agent/dashboard"
+          element={
+            <RequireRole role="agent">
+              <AgentDashboard />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/platform/dashboard"
+          element={
+            <RequireRole role="platform_admin">
+              <LazyDashboard>
+                <PlatformDashboard />
+              </LazyDashboard>
+            </RequireRole>
+          }
+        />
         {/* Public - a guest with no account searches/picks a seat/books the
             same as a logged-in customer; see SeatSelection.jsx for how it
             branches between useCreateBooking and useCreateGuestBooking. */}

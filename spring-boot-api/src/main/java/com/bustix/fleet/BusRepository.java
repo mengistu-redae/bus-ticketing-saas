@@ -13,4 +13,7 @@ public interface BusRepository extends JpaRepository<Bus, UUID> {
     List<Bus> findAllByTenantId(UUID tenantId);
 
     Optional<Bus> findByIdAndTenantId(UUID id, UUID tenantId);
+
+    /** Operator dashboard fleet count. */
+    long countByTenantIdAndActiveTrue(UUID tenantId);
 }

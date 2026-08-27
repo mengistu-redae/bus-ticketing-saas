@@ -15,6 +15,9 @@ public interface RouteRepository extends JpaRepository<Route, UUID> {
 
     Optional<Route> findByIdAndTenantId(UUID id, UUID tenantId);
 
+    /** Operator dashboard fleet count. */
+    long countByTenantIdAndActiveTrue(UUID tenantId);
+
     // Customer-scoped: deliberately NOT tenant-filtered - this is the
     // marketplace search across every operator on the platform. tenant_id is
     // just a normal returned column here, not a filter.

@@ -21,6 +21,19 @@ public interface TripRepository extends JpaRepository<Trip, UUID> {
     // after "now", across every operator.
     List<Trip> findAllByRouteIdAndDepartureAtAfter(UUID routeId, Instant after);
 
+    // ---- dashboard aggregates (com.bustix.dashboard.DashboardService) ----
+
+    long countByTenantIdAndStatusAndDepartureAtAfter(UUID tenantId, String status, Instant after);
+
+    List<Trip> findTop8ByTenantIdAndStatusAndDepartureAtAfterOrderByDepartureAtAsc(
+            UUID tenantId, String status, Instant after);
+
+    /** Agent dashboard: departures leaving within the next 24h. */
+    List<Trip> findByTenantIdAndStatusAndDepartureAtBetweenOrderByDepartureAtAsc(
+            UUID tenantId, String status, Instant from, Instant to);
+
+    long countByStatusAndDepartureAtAfter(String status, Instant after); // platform_admin (cross-tenant)
+
     /**
      * Boarding Gate State Machine's "Gate Lockout" (see
      * my-notes/ethiopian_bus_system_specs.md section 4.1) - bulk-flips any

@@ -38,6 +38,9 @@ export default function AppShell() {
               )}
               {hasRole('agent') && (
                 <>
+                  <NavLink to="/agent/dashboard" className={navLinkClass}>
+                    Dashboard
+                  </NavLink>
                   <NavLink to="/agent" end className={navLinkClass}>
                     New Booking
                   </NavLink>
@@ -48,6 +51,9 @@ export default function AppShell() {
               )}
               {hasRole('operator_admin') && (
                 <>
+                  <NavLink to="/operator/dashboard" className={navLinkClass}>
+                    Dashboard
+                  </NavLink>
                   <NavLink to="/operator/buses" className={navLinkClass}>
                     Buses
                   </NavLink>
@@ -75,9 +81,14 @@ export default function AppShell() {
                 </NavLink>
               )}
               {hasRole('platform_admin') && (
-                <NavLink to="/platform/operators" className={navLinkClass}>
-                  Operators
-                </NavLink>
+                <>
+                  <NavLink to="/platform/dashboard" className={navLinkClass}>
+                    Dashboard
+                  </NavLink>
+                  <NavLink to="/platform/operators" className={navLinkClass}>
+                    Operators
+                  </NavLink>
+                </>
               )}
             </nav>
           </div>

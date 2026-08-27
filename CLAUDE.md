@@ -889,6 +889,92 @@ three pieces - only `npm run build`, never exercised live in Chrome; worth
 doing before fully trusting the new UI (the items editor, payments
 section, request form, pending-requests inbox, confirm-and-issue form).
 
+## Dashboards
+
+Added 2026-08-27. Before this, every authenticated user landed on `/` =
+`pages/customer/Home.jsx` (the marketplace search box) - an operator_admin/
+agent/platform_admin saw a customer trip-search form with no overview.
+There were **no aggregate/stats endpoints** at all; every repository method
+was a single-entity lookup or a full unfiltered list.
+
+New `com.bustix.dashboard` package (`DashboardController`/`DashboardService`
++ record response shapes), one read-only endpoint per role, each gated by
+`@PreAuthorize` and scoped exactly like the rest of the API:
+
+- `GET /api/operator/dashboard?period=7d|30d|90d` (`OPERATOR_ADMIN`,
+  tenant-scoped via `TenantContext.require()`)
+- `GET /api/agent/dashboard` (`AGENT`, tenant-scoped; fixed 14-day window,
+  no period param)
+- `GET /api/platform/dashboard?period=` (`PLATFORM_ADMIN`, **cross-tenant,
+  never touches `TenantContext`**)
+- `GET /api/my-dashboard` (`CUSTOMER`, ownership-scoped via
+  `currentUserService.resolveInternalUserId`)
+
+**No `SecurityConfig` or `node-bff` change** - the blanket `/api/**`
+`.authenticated()` rule already covers these, and `forwardToApi` passes the
+`period` query param straight through. New repository query methods were
+added to the existing domain repositories (Booking/Trip/Cargo/Bus/Route/
+Operator/Payment), each tenant-scoped one taking `tenantId` explicitly, same
+"scope is visible in the method signature" convention as everything else.
+
+**Analytics (operator + platform get the full treatment; v2, same day):**
+period-over-period deltas (`{current, previous, deltaPct}`), a gap-filled
+daily `series` (bookings/revenue/cancellations), categorical `breakdowns`
+(booking channel / booking status / cargo status / payment method),
+`topRoutes` by confirmed revenue, and seat-`occupancy` on upcoming
+departures. Agent gets a light refresh (a 14-day counter-bookings
+sparkline, no charts); the customer dashboard is a compact block appended
+inside `Home.jsx` below the search hero (upcoming trips + counts + active
+shipments, no analytics - a customer has 1-2 trips).
+
+- **The daily `series` uses the first `@Query(nativeQuery = true)` in this
+  codebase** - JPQL has no `date_trunc`. Buckets are
+  `date_trunc('day', created_at AT TIME ZONE 'UTC')` - UTC, matching
+  `hibernate.jdbc.time_zone: UTC` and how v1's "today" boundary works
+  (a booking at 02:00 EAT counts to the previous UTC day - a known,
+  deliberate simplification). `topRoutes` is also native (a
+  `bookings→trips→routes` join, and those are plain UUID FK columns here,
+  not mapped JPA relations). Everything else stays JPQL/derived.
+- **Revenue = `SUM(bookings.total_amount)` for `status='confirmed'`** - the
+  `payments` table is *not* summed for revenue (a payment is a separate
+  optional staff action, not auto-created - see "Known gaps"); it only
+  feeds the payment-method breakdown.
+
+Routing: `App.jsx`'s `/` is now a `RoleHome` that renders the caller's own
+dashboard (operator_admin/agent/platform_admin) or falls through to `Home`
+(customer + logged-out guest). Stable deep-links exist too
+(`/operator/dashboard`, `/agent/dashboard`, `/platform/dashboard`), each
+`RequireRole`-wrapped; `AppShell` nav gained a "Dashboard" link per staff
+role.
+
+Frontend: **Recharts** is the first charting dependency in the repo
+(`node-bff/frontend/package.json`) - lazy-loaded (`React.lazy` on the
+operator/platform pages) so its ~115KB-gzip chunk is fetched *only* for
+those two roles; the customer/guest/agent first load is unchanged. The
+agent sparkline and stat-card sparklines are hand-rolled inline SVG
+(`components/Sparkline.jsx`), no Recharts. New shared pieces:
+`components/charts/{TrendLineChart,BreakdownDonut}.jsx`,
+`components/{StatCard,Sparkline,TrendBadge,PeriodSelector,RankedBarList,
+DashboardPanels}.jsx`, `lib/chartTheme.js` (literal hex - Recharts needs
+colour strings; the categorical palette is the `dataviz` skill's validated
+default). `PeriodSelector` persists the chosen window to
+`localStorage["bustix.dashboard.period"]`. **No dark mode** - the app has
+no theme system (`bg-slate-50` hardcoded), charts are light-palette only.
+
+`DashboardIntegrationTest` covers all four endpoints (per-role gate,
+seeded-data aggregates, `series` length per period, deltaPct, breakdown
+keys, top-routes ordering) - compiles, same Testcontainers-unrun caveat as
+the rest of the suite. Verified live end-to-end in a real Chrome browser
+as all four demo users against the running dev stack: period selector
+switching every chart/KPI, all breakdown donuts + leaderboards rendering
+with real seeded numbers that cross-check against the existing list pages
+(30 bookings = channel-donut total; 633.00 revenue = the 3 confirmed
+bookings), the agent sparkline, the refreshed customer block, and the
+role gate (operator_admin hitting `/platform/dashboard` redirects to `/`).
+The two npm advisories `npm install` surfaced (`esbuild`/`vite`) are
+pre-existing dev-server-only issues, unrelated to Recharts, with no effect
+on the served production build.
+
 ## Pricing
 
 v1 prices per trip, flat, regardless of seat (`trips.price`,

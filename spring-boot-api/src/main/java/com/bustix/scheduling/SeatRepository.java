@@ -13,4 +13,7 @@ public interface SeatRepository extends JpaRepository<Seat, UUID> {
     Optional<Seat> findByIdAndTripId(UUID id, UUID tripId);
 
     long countByTripIdAndStatus(UUID tripId, String status);
+
+    /** Total generated seats on a trip = its effective capacity (see DashboardService). */
+    long countByTripId(UUID tripId);
 }
