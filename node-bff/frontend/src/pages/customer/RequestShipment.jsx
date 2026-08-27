@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useRequestShipment } from '../../api/queries.js';
+import { useRequestShipment, useOperators } from '../../api/queries.js';
 import ErrorBanner from '../../components/ErrorBanner.jsx';
 import WaybillItemsEditor from '../../components/WaybillItemsEditor.jsx';
 
@@ -23,8 +23,10 @@ export default function RequestShipment() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const requestShipment = useRequestShipment();
+  const { data: operators = [], isLoading: operatorsLoading } = useOperators();
 
   const [form, setForm] = useState({
+    operatorId: '',
     consignorName: user?.name || user?.preferred_username || '',
     consignorPhone: '',
     consigneeName: '',
@@ -39,12 +41,13 @@ export default function RequestShipment() {
     event.preventDefault();
     setFormError(null);
     const itemsValid = form.items.length > 0 && form.items.every((i) => i.description && i.grossWeightKg);
-    if (!form.consignorName || !form.consignorPhone || !form.consigneeName || !form.consigneePhone || !itemsValid) {
-      setFormError('Your name/phone, the recipient\'s name/phone, and every item\'s description/estimated weight are all required.');
+    if (!form.operatorId || !form.consignorName || !form.consignorPhone || !form.consigneeName || !form.consigneePhone || !itemsValid) {
+      setFormError('An operator, your name/phone, the recipient\'s name/phone, and every item\'s description/estimated weight are all required.');
       return;
     }
     try {
       const created = await requestShipment.mutateAsync({
+        operatorId: form.operatorId,
         consignorName: form.consignorName,
         consignorPhone: form.consignorPhone,
         consigneeName: form.consigneeName,
@@ -73,6 +76,24 @@ export default function RequestShipment() {
       </p>
 
       <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-surface p-4">
+        <div className="mb-4">
+          <Field label="Operator">
+            <select
+              value={form.operatorId}
+              onChange={(e) => setForm({ ...form, operatorId: e.target.value })}
+              className={`${inputClass} max-w-md`}
+              disabled={operatorsLoading}
+            >
+              <option value="">{operatorsLoading ? 'Loading operators…' : 'Choose an operator…'}</option>
+              {operators.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <fieldset className="rounded-lg border border-slate-200 p-3">
             <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">You (sender)</legend>

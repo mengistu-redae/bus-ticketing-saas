@@ -166,7 +166,7 @@ public class DashboardService {
         return new AgentDashboard(
                 myCounter,
                 bookingRepository.countByTenantIdAndCreatedAtAfter(tenantId, startOfToday),
-                cargoWaybillRepository.countByStatusAndTenantIdIsNull("requested"),
+                cargoWaybillRepository.countByTenantIdAndStatus(tenantId, "requested"),
                 cargoWaybillRepository.countByTenantIdAndStatusIn(tenantId, ACTIVE_WAYBILL_STATUSES),
                 sparkline,
                 next24h,
@@ -197,7 +197,7 @@ public class DashboardService {
 
         var cargo = new PlatformDashboard.Cargo(
                 cargoWaybillRepository.countByStatusInAndTenantIdNotNull(ACTIVE_WAYBILL_STATUSES),
-                cargoWaybillRepository.countByStatusAndTenantIdIsNull("requested"));
+                cargoWaybillRepository.countByStatus("requested"));
 
         DailySeries series = zeroFillSeries(
                 bookingRepository.dailySeriesAllTenants(w.since), w.startDate, w.today);

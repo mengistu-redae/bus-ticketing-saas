@@ -547,6 +547,19 @@ export function useMyShipments() {
   return useQuery({ queryKey: ['my-shipments'], queryFn: () => apiGet('/api/my-shipments') });
 }
 
+/**
+ * GET /api/operators - id + name of active operators, for the operator
+ * picker on the shipment-request form (a request is routed to one operator
+ * at creation, see spring-boot-api's CargoWaybillService.requestShipment).
+ */
+export function useOperators() {
+  return useQuery({
+    queryKey: ['operators'],
+    queryFn: () => apiGet('/api/operators'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useMyShipment(waybillId) {
   return useQuery({
     queryKey: ['my-shipments', waybillId],

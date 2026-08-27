@@ -1,5 +1,6 @@
 package com.bustix.cargo;
 
+import com.bustix.fleet.RouteRepository;
 import com.bustix.tenant.TenantContext;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -32,9 +33,11 @@ import java.util.UUID;
 public class CargoRateController {
 
     private final CargoRateRepository cargoRateRepository;
+    private final RouteRepository routeRepository;
 
-    public CargoRateController(CargoRateRepository cargoRateRepository) {
+    public CargoRateController(CargoRateRepository cargoRateRepository, RouteRepository routeRepository) {
         this.cargoRateRepository = cargoRateRepository;
+        this.routeRepository = routeRepository;
     }
 
     @GetMapping
@@ -52,8 +55,15 @@ public class CargoRateController {
     @PostMapping
     @PreAuthorize("hasRole('OPERATOR_ADMIN')")
     public CargoRate create(@Valid @RequestBody CreateCargoRateRequest request) {
+        UUID tenantId = TenantContext.require();
         CargoRate rate = new CargoRate();
-        rate.setTenantId(TenantContext.require());
+        rate.setTenantId(tenantId);
+        // A route-specific rate's routeId must belong to the caller's own
+        // operator - same cross-reference check TripCreationService does.
+        if (request.routeId() != null) {
+            routeRepository.findByIdAndTenantId(request.routeId(), tenantId)
+                    .orElseThrow(() -> new NoSuchElementException("Route not found: " + request.routeId()));
+        }
         rate.setRouteId(request.routeId());
         if (request.freeWeightThresholdKg() != null) {
             rate.setFreeWeightThresholdKg(request.freeWeightThresholdKg());

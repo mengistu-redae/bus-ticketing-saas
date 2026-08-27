@@ -108,20 +108,45 @@ There is **no** blanket Hibernate multi-tenant filter. Instead:
 - `TenantContextFilter` runs once per request (after JWT auth), reads the org
   claim off a staff token, resolves it to an `operators.id` via
   `OperatorRepository.findByKeycloakOrgId`, and stashes it in the
-  request-scoped `TenantContext`.
+  request-scoped `TenantContext`. **It's also the operator-deactivation
+  enforcement point** (added 2026-08-27): if the resolved operator's
+  `status != "active"` the filter writes a plain `403 "Operator account is
+  deactivated"` and stops the chain - the staff token is locked out of the
+  whole API, not just booking creation. Only staff tokens carry an org
+  claim, so customer / guest / `platform_admin` requests are untouched (a
+  `platform_admin` can still administer a deactivated operator; a customer
+  can still search the marketplace). `BookingService.createBooking` keeps
+  its own narrower `OperatorInactiveException` check because that's the only
+  guard for the customer/guest booking path - those tokens have no org
+  claim, so the filter never sees them.
 - Every staff-scoped repository method takes the tenant id **explicitly** as
   a parameter (`findByTenantIdAndId(...)`, `findAllByTenantId(...)`) rather
   than a query implicitly reading `TenantContext` deep inside a shared base
   repository - you can tell whether an endpoint is tenant-scoped or
-  cross-tenant just by reading its method signature.
+  cross-tenant just by reading its method signature. Write paths that
+  reference another resource by id validate it against the caller's tenant
+  too (`TripCreationService`'s route/bus, `CargoWaybillService`'s trip/
+  booking, `BookingRescheduleService`'s new trip, and - since 2026-08-27 -
+  `RefundPolicyController`/`CargoRateController`'s optional `routeId`).
 - `TenantContext` is `null` for customer tokens (customers aren't a member of
   any Organization) and for `platform_admin` tokens (acting across every
   tenant). Code that legitimately needs a tenant on the request calls
   `TenantContext.require()`, which throws instead of silently proceeding with
   `null` if wired to the wrong kind of token.
+- Every `/api/**` endpoint carries a `@PreAuthorize` (method security is
+  enabled - see "Auth / BFF details") except the deliberately-public
+  marketplace/guest/track paths in `SecurityConfig`'s `permitAll()` list.
 
-Same shape for `AppUser.tenant_id`: nullable, `NULL` for customers/platform
-admins, set for operator staff.
+`AppUser.tenant_id` is a **mirror only** - nullable (`NULL` for customers/
+platform admins, set for staff), written once at provision time from
+`TenantContext`, and **never consulted for authorization**. The per-request
+token is the source of truth, so moving a user between Keycloak orgs takes
+effect immediately regardless of the stale `app_user.tenant_id`.
+
+`TenantIsolationIntegrationTest` (`com.bustix.tenant`) is the consolidated
+proof: for every staff-scoped resource, operator A seeds it and operator
+B's agent/admin is refused (404/403) on every read/write/action path -
+plus the deactivation lockout and the cargo-request routing below.
 
 **Marketplace exception** - customers browse/book across every operator, so
 these read paths are intentionally cross-tenant (no tenant filter):
@@ -737,26 +762,37 @@ deleted again the same session).
 
 ## Operator status enforcement
 
-Added 2026-08-26, closing one of the two items the "Known gaps" section
-used to flag: `operators.status` (set by `PlatformController.deactivate`)
-was never read anywhere. Scope was deliberately narrowed to
-**booking-time-only** (confirmed with the user before building, one of
-several explicit scoping choices this session): `BookingService.createBooking`
-- the single method both `POST /api/bookings` and `POST /api/bookings/guest`
-funnel through - looks up the trip's `Operator` (`trip.getTenantId()` is
-directly the operator id, no join needed) right after resolving the trip,
-before the idempotency check or any Redis seat-lock, and throws a new
-`OperatorInactiveException` (409, `BookingController`) if
-`!"active".equals(operator.getStatus())`. Deliberately **not** extended to
-`TenantContextFilter` (staff login) or `TripController.search` (marketplace
-search) - a deactivated operator's trips still show up in search, and its
-staff can still log in; only the final booking call is blocked. This is a
-known, intentional residual gap, not an oversight: a customer can search,
-pick a seat, and only discover the operator isn't accepting bookings at the
-last step. Verified live: deactivated the demo operator, confirmed both an
-authenticated counter booking and a guest booking against its trip 409
-with the seat never actually locked, confirmed search still lists the
-trip, reactivated, confirmed booking succeeds again.
+`operators.status` (set by `PlatformController.deactivate`) is enforced in
+**two layers**:
+
+- **Staff API lockout (`TenantContextFilter`, added 2026-08-27)** - a
+  deactivated operator's `operator_admin`/`agent` tokens get a flat
+  `403 "Operator account is deactivated"` on *every* `/api/**` call, before
+  any controller runs. See the Tenancy model section above.
+- **Booking-time (`BookingService.createBooking`, added 2026-08-26)** - the
+  single method both `POST /api/bookings` and `POST /api/bookings/guest`
+  funnel through looks up the trip's `Operator` (`trip.getTenantId()` is
+  directly the operator id, no join) right after resolving the trip, before
+  the idempotency check or any Redis seat-lock, and throws
+  `OperatorInactiveException` (409, `BookingController`) if not `"active"`.
+  This layer stays because it's the only guard for the **customer/guest**
+  booking path - those tokens carry no org claim, so the filter never sees
+  them.
+
+Deliberately **not** enforced on `TripController.search` (the marketplace) -
+a deactivated operator's trips still appear in search, so a customer can
+pick a seat and only hit the 409 at the final booking step. That residual
+is intentional (marketplace visibility ≠ ability to transact).
+
+**Reactivation is still direct-SQL only** - `PlatformController` has no
+reactivate endpoint (`status` isn't in `UpdateOperatorRequest`); this
+matters more now that deactivation is a hard lockout. Worth a follow-up.
+
+Verified live (both dates): deactivated the demo operator, confirmed a
+guest/counter booking 409s with the seat never locked and (2026-08-27) that
+`demo-agent`/`demo-operator-admin` get 403 on dashboards/fleet/cargo while
+`demo-customer` search and `demo-platform-admin` operator management still
+work; reactivated, confirmed access returns.
 
 ## Cargo module: multi-item waybills, payments ledger, customer-initiated requests
 
@@ -815,19 +851,20 @@ total" pattern.
 two-phase flow, since a shipment has to be physically weighed at a
 counter - a customer can't issue a fully-priced waybill themselves.
 `POST /api/my-shipments` (`CUSTOMER`, `CreateShipmentRequest` - no
-`tripId`, no pricing) creates a waybill with a new `status="requested"`,
-`tenantId`/`tripId` both null. Staff review it via a new
-`GET /api/cargo/requests` inbox (`CargoWaybillRepository.findAllByStatusAndTenantIdIsNull`
-- deliberately visible to **any** operator's staff until claimed, since a
-`requested` waybill has no tenant to scope by yet; v1 has no concept of
-"which operator should handle this" until a staff member picks a trip,
-flagged as an intentional cut, not per-operator routed) and turn one into
-a normal issued waybill via `POST /api/cargo/waybills/{id}/confirm-and-issue`
-(`ConfirmAndIssueWaybillRequest` - assigns the real trip, and therefore
-the tenant/operator too, the first point this waybill gets one; optionally
-overrides the consignee ID or re-weighs the items after physically
-inspecting the shipment; runs the same unchanged `calculatePricing`; flips
-`requested` → `issued`). Idempotent past `requested` - same convention as
+`tripId`, no pricing) creates a waybill with `status="requested"` and
+`tripId` null. **As of 2026-08-27 the customer routes the request to one
+operator up front** (`operatorId`, required - the shipment-request form has
+an operator picker fed by the new `GET /api/operators`), so `tenantId` is
+set from creation and the waybill only ever appears in *that* operator's
+inbox. Staff review it via `GET /api/cargo/requests`
+(`findAllByTenantIdAndStatus(tenantId, "requested")` - tenant-scoped like
+every other staff endpoint now; the old `...TenantIdIsNull` finder and its
+"visible to any operator" caveat are gone) and turn one into a normal
+issued waybill via `POST /api/cargo/waybills/{id}/confirm-and-issue`
+(`ConfirmAndIssueWaybillRequest` - `findByIdAndTenantId`-scoped like the
+rest; assigns the real trip; optionally overrides the consignee ID or
+re-weighs the items after physically inspecting the shipment; runs the same
+unchanged `calculatePricing`; flips `requested` → `issued`). Idempotent past `requested` - same convention as
 `dispatch`/`arrive`/`collect` - 409s via a new `RequestNotIssuableException`
 on anything out of order or still missing a consignee ID from both sides.
 `GET /api/my-shipments` now unions two ownership paths, not mutually
@@ -837,15 +874,15 @@ they requested directly (`CargoWaybillRepository.findAllOwnedByCustomer`).
 **The one real convention-break in this whole session, done deliberately**:
 `CargoWaybill` no longer extends `BaseTenantEntity` - it declares its own
 `id`/`tenantId`/`createdAt` fields directly instead, same precedent as
-`AppUser` (nullable `tenantId`, doesn't extend it either) - since a
-`requested` waybill genuinely has no operator yet, but
-`BaseTenantEntity.tenantId` is `@Column(nullable = false)`. Flagged
-explicitly in `CargoWaybill`'s own javadoc rather than weakening that
-constraint for every other tenant-scoped entity in the app. Every existing
-derived-query repository method (`findByIdAndTenantId`, `findAllByTenantId`,
-etc.) kept working unchanged - those are just method names against a
-`tenantId` property that still exists, now declared locally instead of
-inherited.
+`AppUser` (nullable `tenantId`, doesn't extend it either). This was
+originally because a `requested` waybill had no operator yet; **as of
+2026-08-27 a request is routed to an operator at creation** (see above), so
+`tenant_id` is in practice always populated now - but the entity keeps its
+declared-locally / nullable shape rather than churning back to
+`BaseTenantEntity` + a `NOT NULL` migration on a column `V11` just made
+nullable. Every existing derived-query repository method
+(`findByIdAndTenantId`, `findAllByTenantId`, etc.) works unchanged - those
+are just method names against a `tenantId` property that still exists.
 
 Frontend for the request flow: new `pages/customer/RequestShipment.jsx`
 (reuses `WaybillItemsEditor`, no trip picker - the customer may not know
@@ -1384,6 +1421,14 @@ actual user rather than through curl:**
   flow - creating a booking doesn't require or create a payment, and
   cancelling one doesn't automatically void/reverse any payment recorded
   against it. Recording a payment is a deliberate, separate staff action.
+- **Operator isolation** was audited/hardened 2026-08-27 (see "Tenancy
+  model" + `TenantIsolationIntegrationTest`) and is solid, but two
+  *intentional* residuals remain: (1) a deactivated operator's trips still
+  appear in marketplace search (`TripController.search`) - only the final
+  booking call and staff API access are blocked, not visibility; (2)
+  `PlatformController` has no reactivate endpoint, so undoing a
+  deactivation is still a direct-SQL `UPDATE operators SET status='active'`.
+  Neither is an oversight; both are follow-ups if they start to bite.
 - Email is a stub (`LoggingEmailSender` just logs) - the outbox table,
   retry, and status-tracking machinery around it doesn't need to change when
   a real `NotificationSender` is swapped in.

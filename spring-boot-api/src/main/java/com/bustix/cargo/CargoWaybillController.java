@@ -90,9 +90,10 @@ public class CargoWaybillController {
     @GetMapping("/api/cargo/waybills/{waybillId}")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
     public WaybillWithItems get(@PathVariable UUID waybillId) {
-        UUID tenantId = TenantContext.require();
-        CargoWaybill waybill = cargoWaybillRepository.findById(waybillId)
-                .filter(w -> w.getTenantId() == null || tenantId.equals(w.getTenantId()))
+        // Fully tenant-scoped - a "requested" waybill now carries its intended
+        // operator from creation (see CargoWaybillService.requestShipment), so
+        // there's no longer a null-tenant case to allow through.
+        CargoWaybill waybill = cargoWaybillRepository.findByIdAndTenantId(waybillId, TenantContext.require())
                 .orElseThrow(() -> new NoSuchElementException("Waybill not found: " + waybillId));
         return withItems(waybill);
     }
@@ -182,15 +183,16 @@ public class CargoWaybillController {
     }
 
     /**
-     * Staff-facing inbox of "requested" waybills awaiting review - see
-     * CargoWaybillRepository.findAllByStatusAndTenantIdIsNull's javadoc for
-     * why this is visible to any operator's staff, not tenant-scoped like
-     * every other staff endpoint here.
+     * This operator's inbox of "requested" waybills awaiting review. Since
+     * 2026-08-27 a customer routes a request to a specific operator at
+     * creation time (see CargoWaybillService.requestShipment), so this is
+     * tenant-scoped like every other staff endpoint here - an operator only
+     * sees requests addressed to it.
      */
     @GetMapping("/api/cargo/requests")
     @PreAuthorize("hasAnyRole('AGENT', 'OPERATOR_ADMIN')")
     public List<WaybillWithItems> pendingRequests() {
-        return cargoWaybillRepository.findAllByStatusAndTenantIdIsNull("requested").stream()
+        return cargoWaybillRepository.findAllByTenantIdAndStatus(TenantContext.require(), "requested").stream()
                 .map(this::withItems)
                 .toList();
     }

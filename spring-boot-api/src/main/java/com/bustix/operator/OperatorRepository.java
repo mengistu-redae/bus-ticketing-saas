@@ -14,4 +14,7 @@ public interface OperatorRepository extends JpaRepository<Operator, UUID> {
     long countByStatus(String status);
 
     java.util.List<Operator> findTop5ByOrderByCreatedAtDesc();
+
+    /** Public-ish operator directory (OperatorDirectoryController) - e.g. the customer's shipment-request operator picker. */
+    java.util.List<Operator> findAllByStatusOrderByName(String status);
 }

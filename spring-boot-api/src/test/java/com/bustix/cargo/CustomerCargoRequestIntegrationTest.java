@@ -22,10 +22,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * POST /api/my-shipments (customer, CargoWaybillService.requestShipment)
  * -> POST /api/cargo/waybills/{id}/confirm-and-issue (staff,
  * CargoWaybillService.confirmAndIssue) - the two-phase customer-initiated
- * cargo flow added 2026-08-26. Separate test class from
- * CargoWaybillIntegrationTest since this covers a genuinely distinct
- * access pattern (a request has no tenant until confirmed), not just more
- * waybill-lifecycle cases.
+ * cargo flow. Since 2026-08-27 a request is routed to one operator at
+ * creation time (operatorId is required), so the waybill is tenant-scoped
+ * from creation - only that operator's inbox shows it. Cross-operator
+ * negative cases live in TenantIsolationIntegrationTest.
  */
 class CustomerCargoRequestIntegrationTest extends AbstractIntegrationTest {
 
@@ -42,28 +42,53 @@ class CustomerCargoRequestIntegrationTest extends AbstractIntegrationTest {
         cargoRateRepository.save(rate);
     }
 
-    private static final String REQUEST_BODY = """
-            {
-              "consignorName": "Customer Requester",
-              "consignorPhone": "+251911111111",
-              "consigneeName": "Requested Consignee",
-              "consigneePhone": "+251922222222",
-              "items": [{"description": "Two suitcases", "grossWeightKg": 20.0}]
-            }
-            """;
+    private static String requestBody(UUID operatorId) {
+        return """
+                {
+                  "operatorId": "%s",
+                  "consignorName": "Customer Requester",
+                  "consignorPhone": "+251911111111",
+                  "consigneeName": "Requested Consignee",
+                  "consigneePhone": "+251922222222",
+                  "items": [{"description": "Two suitcases", "grossWeightKg": 20.0}]
+                }
+                """.formatted(operatorId);
+    }
 
     @Test
     void customerCanSubmitAShipmentRequestWithNoTripAndNoPricingYet() throws Exception {
+        Operator operator = createOperator("cargo-req-basic-" + UUID.randomUUID(), "Basic Co");
+
         mockMvc.perform(post("/api/my-shipments")
                         .with(asCustomer("customer-req-1"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(REQUEST_BODY))
+                        .content(requestBody(operator.getId())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.waybill.status").value("requested"))
+                // Routed to an operator up front, but no trip picked yet.
+                .andExpect(jsonPath("$.waybill.tenantId").value(operator.getId().toString()))
                 .andExpect(jsonPath("$.waybill.tripId").doesNotExist())
                 .andExpect(jsonPath("$.waybill.totalCargoCost").doesNotExist())
                 .andExpect(jsonPath("$.waybill.grossWeightKg").value(20.0))
                 .andExpect(jsonPath("$.items.length()").value(1));
+    }
+
+    @Test
+    void requestToAnUnknownOrInactiveOperatorIsRejected() throws Exception {
+        mockMvc.perform(post("/api/my-shipments")
+                        .with(asCustomer("customer-req-bad-op"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody(UUID.randomUUID())))
+                .andExpect(status().isNotFound());
+
+        Operator inactive = createOperator("cargo-req-inactive-" + UUID.randomUUID(), "Inactive Co");
+        inactive.setStatus("inactive");
+        operatorRepository.save(inactive);
+        mockMvc.perform(post("/api/my-shipments")
+                        .with(asCustomer("customer-req-inactive-op"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody(inactive.getId())))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -72,7 +97,7 @@ class CustomerCargoRequestIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/my-shipments")
                         .with(asAgent("agent-1", operator.getKeycloakOrgId()))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(REQUEST_BODY))
+                        .content(requestBody(operator.getId())))
                 .andExpect(status().isForbidden());
     }
 
@@ -88,7 +113,7 @@ class CustomerCargoRequestIntegrationTest extends AbstractIntegrationTest {
         String createJson = mockMvc.perform(post("/api/my-shipments")
                         .with(asCustomer("customer-req-2"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(REQUEST_BODY))
+                        .content(requestBody(operator.getId())))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         String waybillId = objectMapper.readTree(createJson).get("waybill").get("id").asText();
@@ -98,11 +123,6 @@ class CustomerCargoRequestIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.waybill.id=='" + waybillId + "')]").exists());
 
-        // The staff single-waybill GET must also let a still-unclaimed
-        // ("requested", tenantId null) waybill through - found live in the
-        // browser: GET was still tenant-scoped via findByIdAndTenantId,
-        // 404ing on every request before it was ever confirmed-and-issued,
-        // even for the agent who'd go on to claim it.
         mockMvc.perform(get("/api/cargo/waybills/" + waybillId)
                         .with(asAgent("agent-1", operator.getKeycloakOrgId())))
                 .andExpect(status().isOk())
@@ -150,7 +170,7 @@ class CustomerCargoRequestIntegrationTest extends AbstractIntegrationTest {
         String createJson = mockMvc.perform(post("/api/my-shipments")
                         .with(asCustomer("customer-req-3"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(REQUEST_BODY))
+                        .content(requestBody(operator.getId())))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         String waybillId = objectMapper.readTree(createJson).get("waybill").get("id").asText();
@@ -164,10 +184,12 @@ class CustomerCargoRequestIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void aCustomerCannotSeeAnotherCustomersRequest() throws Exception {
+        Operator operator = createOperator("cargo-req-own-" + UUID.randomUUID(), "Own Co");
+
         String createJson = mockMvc.perform(post("/api/my-shipments")
                         .with(asCustomer("customer-req-owner"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(REQUEST_BODY))
+                        .content(requestBody(operator.getId())))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         String waybillId = objectMapper.readTree(createJson).get("waybill").get("id").asText();

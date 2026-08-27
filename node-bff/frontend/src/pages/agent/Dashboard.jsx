@@ -11,9 +11,14 @@ import { DashboardSection, RecentBookingsPanel, DeparturesPanel } from '../../co
  * directly at /agent/dashboard.
  */
 export default function AgentDashboard() {
-  const { data, isLoading, isError, error, refetch } = useAgentDashboard();
+  const { data, isError, error, refetch } = useAgentDashboard();
 
-  if (isLoading) {
+  if (isError && !data) {
+    return <ErrorBanner message={error?.message} onRetry={refetch} />;
+  }
+  if (!data) {
+    // covers isLoading and the gap between retry attempts (isLoading can be
+    // false there while data is still undefined).
     return (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -21,9 +26,6 @@ export default function AgentDashboard() {
         ))}
       </div>
     );
-  }
-  if (isError) {
-    return <ErrorBanner message={error?.message} onRetry={refetch} />;
   }
 
   const {

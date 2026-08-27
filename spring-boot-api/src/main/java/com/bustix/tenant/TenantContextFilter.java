@@ -21,6 +21,14 @@ import java.io.IOException;
  * rest of the request. Customer and platform_admin tokens have no such
  * claim, so TenantContext stays empty for them - that's expected, not a bug.
  *
+ * Also the enforcement point for operator deactivation: if the resolved
+ * operator's status isn't "active", the staff token is locked out of the
+ * whole API here with a 403, before any controller runs. This is the broad
+ * lockout; BookingService.createBooking keeps its own narrower
+ * OperatorInactiveException check because that's the only guard for the
+ * customer/guest booking path (those tokens carry no org claim, so this
+ * filter never sees them).
+ *
  * Registered in SecurityConfig with addFilterAfter(...), so it always runs
  * after authentication has populated the SecurityContext.
  */
@@ -45,8 +53,23 @@ public class TenantContextFilter extends OncePerRequestFilter {
         try {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             if (auth != null && auth.getPrincipal() instanceof Jwt jwt) {
-                extractOrgId(jwt).flatMap(operatorRepository::findByKeycloakOrgId)
-                        .ifPresent(operator -> TenantContext.set(operator.getId()));
+                var operator = extractOrgId(jwt)
+                        .flatMap(operatorRepository::findByKeycloakOrgId)
+                        .orElse(null);
+                if (operator != null) {
+                    if (!"active".equals(operator.getStatus())) {
+                        // Hard lockout - a deactivated operator's staff lose all
+                        // API access, not just booking creation. Write the body
+                        // directly rather than response.sendError(...): sendError
+                        // triggers the servlet container's forward to /error, a
+                        // fresh dispatch back through this chain.
+                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                        response.setContentType("text/plain;charset=UTF-8");
+                        response.getWriter().write("Operator account is deactivated");
+                        return;
+                    }
+                    TenantContext.set(operator.getId());
+                }
             }
             filterChain.doFilter(request, response);
         } finally {

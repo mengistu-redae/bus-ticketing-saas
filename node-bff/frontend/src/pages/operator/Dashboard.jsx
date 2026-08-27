@@ -34,7 +34,7 @@ function slices(rows = [], colorMap, metric = 'count') {
  */
 export default function OperatorDashboard() {
   const [period, setPeriod] = useState(loadPeriod);
-  const { data, isLoading, isError, error, refetch, isFetching } = useOperatorDashboard(period);
+  const { data, isError, error, refetch, isFetching } = useOperatorDashboard(period);
 
   return (
     <div className="flex flex-col gap-8">
@@ -43,14 +43,15 @@ export default function OperatorDashboard() {
         <PeriodSelector value={period} onChange={setPeriod} />
       </div>
 
-      {isLoading && (
+      {!data && isError && <ErrorBanner message={error?.message} onRetry={refetch} />}
+      {!data && !isError && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-24 w-full" />
           ))}
         </div>
       )}
-      {isError && <ErrorBanner message={error?.message} onRetry={refetch} />}
+      {data && isError && <ErrorBanner message={error?.message} onRetry={refetch} />}
 
       {data && (
         <div className={`flex flex-col gap-8 transition-opacity ${isFetching ? 'opacity-60' : ''}`}>

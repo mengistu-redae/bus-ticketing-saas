@@ -3,9 +3,11 @@ package com.bustix.cargo;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Customer self-service shipment request (POST /api/my-shipments) -
@@ -20,8 +22,14 @@ import java.util.List;
  * confirm-and-issue time. consigneeIdNumber is optional here unlike
  * CreateWaybillRequest's required version - a request made ahead of time
  * may not have it on hand yet.
+ *
+ * operatorId IS required: a request is routed to one operator from creation
+ * (the waybill's tenant_id is set immediately), so it only ever appears in
+ * that operator's /api/cargo/requests inbox - not every operator's.
  */
 public record CreateShipmentRequest(
+    @NotNull UUID operatorId,
+
     @NotBlank String consignorName,
     @Pattern(regexp = "^\\+251[79]\\d{8}$", message = "Phone number must be E.164 Ethiopian format, e.g. +251911234567")
     @NotBlank String consignorPhone,

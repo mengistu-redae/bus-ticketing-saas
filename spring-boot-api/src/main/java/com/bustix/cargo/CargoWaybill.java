@@ -20,17 +20,16 @@ import java.util.UUID;
  * for it.
  *
  * Deliberately does NOT extend BaseTenantEntity (unlike every other
- * tenant-scoped entity in this app) - since 2026-08-26's customer-request
- * flow, a "requested"-status waybill genuinely has no operator yet
- * (tenantId is null until a staff member picks a trip and confirms it via
- * CargoWaybillService.confirmAndIssue), but BaseTenantEntity.tenantId is
- * NOT NULL. Rather than weakening that constraint for every other
- * tenant-scoped entity, this one declares its own id/tenantId/createdAt
- * fields directly - same precedent as AppUser (nullable tenantId, doesn't
- * extend BaseTenantEntity either). Every existing derived-query repository
- * method (findByIdAndTenantId, findAllByTenantId, etc.) keeps working
- * unchanged since those are just method names against a tenantId property
- * that still exists, now declared locally instead of inherited.
+ * tenant-scoped entity in this app) - it declares its own id/tenantId/
+ * createdAt fields so tenantId can be nullable (BaseTenantEntity.tenantId is
+ * NOT NULL), same precedent as AppUser. This was originally because a
+ * "requested" waybill had no operator; as of 2026-08-27 a customer routes a
+ * request to one operator at creation (CargoWaybillService.requestShipment),
+ * so tenantId is populated from the start now - the nullable shape is kept
+ * only to avoid churning back to BaseTenantEntity + a NOT NULL migration on
+ * a column V11 just relaxed. Every derived-query repository method
+ * (findByIdAndTenantId, findAllByTenantId, ...) works unchanged - they're
+ * just method names against a tenantId property that still exists.
  */
 @Entity
 @Table(name = "cargo_waybills")

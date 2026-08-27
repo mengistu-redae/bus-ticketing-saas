@@ -50,10 +50,13 @@ public interface CargoWaybillRepository extends JpaRepository<CargoWaybill, UUID
     /** Operator/agent dashboard: waybills still in flight (issued/dispatched/arrived). */
     long countByTenantIdAndStatusIn(UUID tenantId, java.util.Collection<String> statuses);
 
-    /** Pending customer shipment requests - no tenant yet, see this repo's findAllByStatusAndTenantIdIsNull below. */
-    long countByStatusAndTenantIdIsNull(String status);
+    /** Agent dashboard: this operator's pending customer shipment requests. */
+    long countByTenantIdAndStatus(UUID tenantId, String status);
 
-    /** platform_admin dashboard: in-flight waybills across every operator (excludes the tenant-less "requested" ones). */
+    /** platform_admin dashboard: pending customer shipment requests across every operator. */
+    long countByStatus(String status);
+
+    /** platform_admin dashboard: in-flight waybills across every operator. */
     long countByStatusInAndTenantIdNotNull(java.util.Collection<String> statuses);
 
     /** Operator dashboard: freight billed on non-cancelled waybills issued in the window. */
@@ -73,11 +76,4 @@ public interface CargoWaybillRepository extends JpaRepository<CargoWaybill, UUID
             + "WHERE w.tenantId = :tenantId AND w.createdAt >= :since GROUP BY w.status")
     List<Object[]> cargoStatusBreakdown(@Param("tenantId") UUID tenantId, @Param("since") java.time.Instant since);
 
-    // Staff-facing pending-requests inbox (CargoWaybillController.pendingRequests)
-    // - a "requested" waybill has no tenant yet (see CargoWaybill's own
-    // javadoc), so it's invisible to the normal findAllByTenantId-scoped
-    // list. Deliberately visible to ANY operator's staff until claimed -
-    // v1 has no concept of "which operator should handle this request"
-    // until a staff member picks a trip, same as a marketplace-wide inbox.
-    List<CargoWaybill> findAllByStatusAndTenantIdIsNull(String status);
 }

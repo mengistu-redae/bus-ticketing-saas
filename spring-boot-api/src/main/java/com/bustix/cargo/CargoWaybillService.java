@@ -302,11 +302,16 @@ public class CargoWaybillService {
             prohibitedItemsChecker.check(item.description());
         }
 
+        // The customer routes the request to one operator up front - the
+        // waybill is tenant-scoped from creation, so it only ever shows up in
+        // that operator's /api/cargo/requests inbox. (tripId still stays null
+        // until confirmAndIssue - the operator picks the actual bus then.)
+        Operator operator = operatorRepository.findById(request.operatorId())
+                .filter(o -> "active".equals(o.getStatus()))
+                .orElseThrow(() -> new NoSuchElementException("Operator not found: " + request.operatorId()));
+
         CargoWaybill waybill = new CargoWaybill();
-        // tenantId/tripId intentionally left null until confirmAndIssue -
-        // a customer request has no operator or trip yet, see
-        // CargoWaybill's own javadoc for why this entity can hold that
-        // state at all (it no longer extends BaseTenantEntity).
+        waybill.setTenantId(operator.getId());
         waybill.setCustomerUserId(customerUserId);
         waybill.setWaybillNumber(waybillNumberGenerator.nextWaybillNumber("REQ"));
         waybill.setConsignorName(request.consignorName());
@@ -337,11 +342,15 @@ public class CargoWaybillService {
      */
     @Transactional
     public CargoWaybill confirmAndIssue(UUID waybillId, UUID tenantId, UUID issuedByUserId, ConfirmAndIssueWaybillRequest request) {
-        CargoWaybill waybill = cargoWaybillRepository.findById(waybillId)
+        // Tenant-scoped now that a "requested" waybill carries its intended
+        // operator from creation (see requestShipment) - a request routed to
+        // another operator 404s here just like every other cross-tenant
+        // lookup in this app.
+        CargoWaybill waybill = cargoWaybillRepository.findByIdAndTenantId(waybillId, tenantId)
                 .orElseThrow(() -> new NoSuchElementException("Waybill not found: " + waybillId));
 
         if (!"requested".equals(waybill.getStatus())) {
-            if (tenantId.equals(waybill.getTenantId()) && !"cancelled".equals(waybill.getStatus())) {
+            if (!"cancelled".equals(waybill.getStatus())) {
                 return waybill; // idempotent re-call once already issued (or later)
             }
             throw new RequestNotIssuableException(

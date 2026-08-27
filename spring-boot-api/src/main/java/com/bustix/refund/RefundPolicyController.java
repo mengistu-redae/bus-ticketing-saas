@@ -1,5 +1,6 @@
 package com.bustix.refund;
 
+import com.bustix.fleet.RouteRepository;
 import com.bustix.tenant.TenantContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,10 +43,15 @@ import java.util.UUID;
 public class RefundPolicyController {
 
     private final RefundPolicyRepository refundPolicyRepository;
+    private final RouteRepository routeRepository;
     private final ObjectMapper objectMapper;
 
-    public RefundPolicyController(RefundPolicyRepository refundPolicyRepository, ObjectMapper objectMapper) {
+    public RefundPolicyController(
+            RefundPolicyRepository refundPolicyRepository,
+            RouteRepository routeRepository,
+            ObjectMapper objectMapper) {
         this.refundPolicyRepository = refundPolicyRepository;
+        this.routeRepository = routeRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -64,9 +70,10 @@ public class RefundPolicyController {
     @PostMapping
     @PreAuthorize("hasRole('OPERATOR_ADMIN')")
     public RefundPolicy create(@Valid @RequestBody CreateRefundPolicyRequest request) {
+        UUID tenantId = TenantContext.require();
         RefundPolicy policy = new RefundPolicy();
-        policy.setTenantId(TenantContext.require());
-        policy.setRouteId(request.routeId());
+        policy.setTenantId(tenantId);
+        policy.setRouteId(requireOwnedRouteOrNull(request.routeId(), tenantId));
         policy.setRules(writeTiers(request.tiers()));
         return refundPolicyRepository.save(policy);
     }
@@ -98,6 +105,20 @@ public class RefundPolicyController {
     private RefundPolicy findOwnedPolicy(UUID policyId) {
         return refundPolicyRepository.findByIdAndTenantId(policyId, TenantContext.require())
                 .orElseThrow(() -> new NoSuchElementException("Refund policy not found: " + policyId));
+    }
+
+    /**
+     * A route-specific policy's routeId must belong to the caller's own
+     * operator - same cross-reference-validation principle TripCreationService
+     * uses for a trip's route/bus. Null (the operator-wide default) is fine.
+     */
+    private UUID requireOwnedRouteOrNull(UUID routeId, UUID tenantId) {
+        if (routeId == null) {
+            return null;
+        }
+        routeRepository.findByIdAndTenantId(routeId, tenantId)
+                .orElseThrow(() -> new NoSuchElementException("Route not found: " + routeId));
+        return routeId;
     }
 
     private String writeTiers(List<RefundTier> tiers) {
