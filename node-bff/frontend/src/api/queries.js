@@ -353,6 +353,22 @@ export function useFleetTrips() {
   return useQuery({ queryKey: ['fleet', 'trips'], queryFn: () => apiGet('/api/fleet/trips') });
 }
 
+/**
+ * Operator-scoped trip search - GET /api/fleet/trips/search. Same shape as
+ * the cross-operator marketplace useTripSearch, but only the caller's own
+ * trips (an operator never sees another operator's inventory).
+ */
+export function useFleetTripSearch({ origin, destination, departureAfter, page = 0, size = 20 }, enabled) {
+  const params = new URLSearchParams({ origin, destination, page: String(page), size: String(size) });
+  if (departureAfter) params.set('departureAfter', departureAfter);
+  return useQuery({
+    queryKey: ['fleet', 'trips', 'search', origin, destination, departureAfter, page, size],
+    queryFn: () => apiGetWithCount(`/api/fleet/trips/search?${params.toString()}`),
+    enabled: Boolean(enabled && origin && destination),
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useCreateTrip() {
   const queryClient = useQueryClient();
   return useMutation({

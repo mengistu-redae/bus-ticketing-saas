@@ -102,6 +102,14 @@ class TenantIsolationIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/fleet/buses").with(asOperatorAdmin("iso-b-admin", orgB())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+
+        // ...and B's operator-scoped trip search finds none of A's trips
+        // (the cross-operator marketplace search would - that's by design).
+        mockMvc.perform(get("/api/fleet/trips/search")
+                        .param("origin", "Bahir Dar").param("destination", "Gondar")
+                        .with(asOperatorAdmin("iso-b-admin", orgB())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
     }
 
     // ---- Bookings, seats, cancel, reschedule, payments, boarding ----

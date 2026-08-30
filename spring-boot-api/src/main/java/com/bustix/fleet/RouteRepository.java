@@ -39,6 +39,14 @@ public interface RouteRepository extends JpaRepository<Route, UUID> {
     // already applies.
     List<Route> findAllByOriginIgnoreCaseAndDestinationIgnoreCaseAndActiveTrue(String origin, String destination);
 
+    // The operator-scoped counterpart (GET /api/fleet/trips/search,
+    // OPERATOR_ADMIN): same origin/destination match as the marketplace,
+    // but only the caller's own routes. Customers/guests/agents keep using
+    // the cross-operator finder above; an operator only ever searches its
+    // own inventory.
+    List<Route> findAllByTenantIdAndOriginIgnoreCaseAndDestinationIgnoreCaseAndActiveTrue(
+            UUID tenantId, String origin, String destination);
+
     // Backs the From/To autocomplete (GET /api/trips/locations) - a city
     // typed so far is matched as a substring against every active route's
     // origin/destination, not just an exact match like the search query

@@ -158,9 +158,18 @@ soft-deactivated route from still selling - added 2026-08-30, matching the
 unindexed).
 Staff-facing endpoints for managing one operator's own routes/buses/trips use
 the tenant-scoped finders instead. Both are wired up:
-`GET /api/trips/search?origin=...&destination=...&departureAfter=...`
-(`CUSTOMER`/`AGENT`, `TripController.search`) is the customer-facing read
-path over these; `GET/POST/PATCH/DELETE /api/fleet/{buses,routes,trips}(/{id})`
+`GET /api/trips/search?origin=...&destination=...&departureAfter=...&page=&size=`
+(`permitAll()` - guest/customer/agent, `TripController.search`) is the
+**cross-operator** marketplace read; **`GET /api/fleet/trips/search`**
+(same params, `OPERATOR_ADMIN` only, `TripController.operatorSearch`, added
+2026-08-30) is its **tenant-scoped** mirror - an operator only ever
+searches its own inventory (agents keep using the cross-operator one). Both
+share `paginatedTripSearch(...)`; the only difference is the route finder
+(`findAllByTenantId...ActiveTrue` vs the un-scoped one). The operator search
+is also what surfaces per-trip seat availability, which the bare `Trip`
+rows from `GET /api/fleet/trips` don't carry - `pages/operator/Trips.jsx`
+has a "Find trips on route" bar over it.
+`GET/POST/PATCH/DELETE /api/fleet/{buses,routes,trips}(/{id})`
 (`OPERATOR_ADMIN` only, `BusController`/`RouteController`/`TripController`)
 is how an operator's own fleet data gets created, listed, read one at a
 time, corrected, and retired - full CRUD as of 2026-08-23 (previously only

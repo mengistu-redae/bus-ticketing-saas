@@ -92,10 +92,10 @@ public class TripController {
     // Public - a guest browsing/booking a trip with no account needs this
     // before any login exists at all (see V8__guest_bookings.sql /
     // BookingController.createGuestBooking). Matched by a permitAll() in
-    // SecurityConfig ahead of the blanket /api/** authenticated() rule;
-    // this method never branches on role/JWT, so opening it to anonymous
-    // callers changes nothing for the customer/agent callers already using
-    // it.
+    // SecurityConfig ahead of the blanket /api/** authenticated() rule.
+    // Cross-operator by design: a customer / guest / agent compares trips
+    // across every operator on the platform. An operator searching its OWN
+    // inventory uses GET /api/fleet/trips/search below instead.
     @GetMapping("/api/trips/search")
     public ResponseEntity<List<TripSearchResult>> search(
             @RequestParam String origin,
@@ -104,8 +104,6 @@ public class TripController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        Instant after = departureAfter != null ? departureAfter : Instant.now();
-
         // Trimmed and case-insensitive, active routes only - see the query's
         // own comment on RouteRepository for why: found live, a customer
         // typing any casing other than exactly how the operator entered the
@@ -113,10 +111,47 @@ public class TripController {
         // soft-deactivated route must stop selling.
         List<Route> routes = routeRepository.findAllByOriginIgnoreCaseAndDestinationIgnoreCaseAndActiveTrue(
                 origin.trim(), destination.trim());
+        return paginatedTripSearch(routes, resolveAfter(departureAfter), page, size);
+    }
+
+    /**
+     * The operator-scoped mirror of {@link #search}: same origin/destination
+     * match and response shape, but only the calling operator's own routes -
+     * an operator never sees another operator's trips. OPERATOR_ADMIN only
+     * (agents keep using the cross-operator marketplace search above).
+     */
+    @GetMapping("/api/fleet/trips/search")
+    @PreAuthorize("hasRole('OPERATOR_ADMIN')")
+    public ResponseEntity<List<TripSearchResult>> operatorSearch(
+            @RequestParam String origin,
+            @RequestParam String destination,
+            @RequestParam(required = false) Instant departureAfter,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        List<Route> routes = routeRepository.findAllByTenantIdAndOriginIgnoreCaseAndDestinationIgnoreCaseAndActiveTrue(
+                TenantContext.require(), origin.trim(), destination.trim());
+        return paginatedTripSearch(routes, resolveAfter(departureAfter), page, size);
+    }
+
+    private static Instant resolveAfter(Instant departureAfter) {
+        return departureAfter != null ? departureAfter : Instant.now();
+    }
+
+    /**
+     * Shared assembly for both search endpoints: for each route, its
+     * scheduled trips departing after {@code after}, mapped to
+     * {@link TripSearchResult}, sorted by departure, then capped in-memory
+     * to one page (X-Total-Count carries the full size). See {@link #search}
+     * for why the in-memory cap is a defensive stopgap, not a real
+     * pagination fix.
+     */
+    private ResponseEntity<List<TripSearchResult>> paginatedTripSearch(
+            List<Route> routes, Instant after, int page, int size) {
+
         List<TripSearchResult> results = new ArrayList<>();
-        // Request-local memo so a large cross-tenant result set isn't one
-        // operator_settings lookup per trip - operators repeat heavily
-        // across a route's trips.
+        // Request-local memo so a big result set isn't one operator_settings
+        // lookup per trip - operators repeat heavily across a route's trips.
         Map<UUID, EffectiveOperatorSettings> settingsByOperator = new HashMap<>();
 
         for (Route route : routes) {

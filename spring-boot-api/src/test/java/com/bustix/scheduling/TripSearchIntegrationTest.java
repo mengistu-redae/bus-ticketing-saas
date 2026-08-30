@@ -112,12 +112,46 @@ class TripSearchIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$", hasSize(1)));
     }
 
+    // --- GET /api/fleet/trips/search - the operator-scoped mirror. An
+    // operator only ever searches its own inventory; customers/guests/agents
+    // keep using the cross-operator marketplace search above.
+
     @Test
-    void operatorAdminCannotUseTheCustomerFacingSearchEndpoint() throws Exception {
-        mockMvc.perform(get("/api/trips/search")
+    void operatorSearchReturnsOnlyTheCallingOperatorsOwnTrips() throws Exception {
+        Operator operatorA = createOperator("fleet-search-a-" + UUID.randomUUID(), "Fleet Search A");
+        Operator operatorB = createOperator("fleet-search-b-" + UUID.randomUUID(), "Fleet Search B");
+
+        var busA = createBus(operatorA.getId(), "FSA-1", 40, "2x2");
+        var routeA = createRoute(operatorA.getId(), "Addis Ababa", "Dessie");
+        createTrip(operatorA.getId(), routeA.getId(), busA.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("400.00"));
+
+        var busB = createBus(operatorB.getId(), "FSB-1", 40, "2x2");
+        var routeB = createRoute(operatorB.getId(), "Addis Ababa", "Dessie");
+        createTrip(operatorB.getId(), routeB.getId(), busB.getId(),
+                Instant.now().plus(2, ChronoUnit.DAYS), new BigDecimal("380.00"));
+
+        mockMvc.perform(get("/api/fleet/trips/search")
                         .param("origin", "Addis Ababa")
-                        .param("destination", "Bahir Dar")
-                        .with(asOperatorAdmin("admin-1", "some-org")))
+                        .param("destination", "Dessie")
+                        .with(asOperatorAdmin("admin-a", operatorA.getKeycloakOrgId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].operatorId").value(operatorA.getId().toString()))
+                .andExpect(jsonPath("$[0].operatorName").value("Fleet Search A"));
+    }
+
+    @Test
+    void operatorSearchIsOperatorAdminOnly() throws Exception {
+        Operator operator = createOperator("fleet-search-role-" + UUID.randomUUID(), "Role Co");
+
+        mockMvc.perform(get("/api/fleet/trips/search")
+                        .param("origin", "Addis Ababa").param("destination", "Dessie")
+                        .with(asAgent("agent-1", operator.getKeycloakOrgId())))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/fleet/trips/search")
+                        .param("origin", "Addis Ababa").param("destination", "Dessie")
+                        .with(asCustomer("customer-1")))
                 .andExpect(status().isForbidden());
     }
 }
