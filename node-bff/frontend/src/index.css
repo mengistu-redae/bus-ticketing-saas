@@ -9,6 +9,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Default brand/accent palette as space-separated RGB channels (see
+ * tailwind.config.js). These are the Bustix defaults; BrandingProvider
+ * overrides --brand / --accent (and derives the dark/light variants) on
+ * :root for a signed-in operator's staff, and per-card branding scopes
+ * them to a single ticket via an inline style.
+ */
+:root {
+  --brand: 29 78 216;        /* #1D4ED8 */
+  --brand-dark: 30 58 138;   /* #1E3A8A */
+  --brand-light: 239 244 255;/* #EFF4FF */
+  --accent: 245 158 11;      /* #F59E0B */
+  --accent-dark: 180 83 9;   /* #B45309 */
+  --accent-light: 254 243 226;/* #FEF3E2 */
+}
+
 @layer utilities {
   .tabular {
     font-variant-numeric: tabular-nums;

@@ -1118,6 +1118,69 @@ rest of the suite. The config-hub consolidation was verified in a real
 browser as `demo-operator-admin`: the 6-item nav, all three tabs
 rendering their full CRUD UIs, deep-links, and the old-path redirects.
 
+### Operator branding (Phase 1)
+
+Added 2026-08-30, first slice of `my-notes/operator_branding_scope.md`. A
+per-operator logo (URL, **not** an uploaded image - no asset storage in
+this app), `brand`/`accent` colours, customer-facing `display_name` and
+`tagline`. `V13` adds five nullable columns to `operator_settings` (same
+lazy singleton row); null = use the Bustix default, which the **frontend**
+applies - the platform stores no fallback.
+
+- **`GET` / `PATCH /api/operator/branding`** (`OperatorBrandingController`)
+  - a **separate** endpoint from `PATCH /api/fleet/settings`, deliberately:
+  that one is a full-replace of the override set, so a shared request would
+  have the General settings tab wipe branding and vice-versa. This
+  controller writes a **disjoint column set** on the same row. `GET` is
+  `hasAnyRole('OPERATOR_ADMIN','AGENT')` (agents need it to theme the
+  workspace); `PATCH` is `OPERATOR_ADMIN` only. `GET` returns an
+  `OperatorBrandingView` with `displayName` **resolved** to the operator's
+  legal name when unset.
+- **`OperatorBrandingView`** is one shared read shape: returned by that
+  endpoint and embedded as `branding` in `TripSearchResult` /
+  `BookingTrackingView` / `WaybillTrackingView` (populated from the same
+  `OperatorSettingsService.resolve(...)` the contact fields use).
+  `EffectiveOperatorSettings` carries the five branding fields too (raw,
+  no fallback - `OperatorBrandingView.from` does the name fallback).
+- **Frontend theming** - `tailwind.config.js`'s `brand`/`accent` tokens
+  became `rgb(var(--brand) / <alpha-value>)` (the channel form, so
+  `ring-brand/20` still works); defaults live in `src/index.css` `:root`.
+  `src/lib/color.js` converts a hex to RGB channels and derives the
+  dark/light variants. `theme/BrandingProvider.jsx` (mounted in
+  `main.jsx`) fetches `/api/operator/branding` **only** for a signed-in
+  `operator_admin`/`agent` and writes the CSS vars on
+  `document.documentElement` - so the whole **staff workspace** recolours;
+  it exposes `useBranding()` for `AppShell`'s logo/wordmark. Customers and
+  guests never fetch it. **Per-resource** branding (a customer's ticket, a
+  tracking result - which belong to *some* operator, not the viewer) is
+  NOT global-themed: `BookingDetail` / `Track` / `TrackBooking` scope the
+  operator colour to that **one card** via an inline `themeVars(...)`
+  style, and `TripCard` shows just the logo + display name (My Bookings /
+  search span operators - no recolour there).
+- **Config UI** - a 4th "Branding" tab in the Settings hub
+  (`pages/operator/Branding.jsx`): identity fields, `<input type="color">`
+  + hex for each colour, a logo-URL preview, and a live themed-header
+  preview. It reads the **raw** override row via `useOperatorSettings()`
+  (`overrides.*`, nullable) - not the resolved branding GET - so a blank
+  field genuinely means unset; it saves via `PATCH /api/operator/branding`
+  (invalidating both query keys). `public/brand/bustix-mark.svg` is the
+  bundled default logo used on ticket/tracking cards when the operator has
+  none.
+- **Deferred** (later phases of the scope doc): operator microsites
+  (`/o/<slug>`), custom domains, branded email.
+
+Verified live: `V13` applied + Hibernate `validate` passed; `GET` with no
+row → `displayName` = legal name, colours/logo null; `PATCH` persists;
+`AGENT` `GET` ok / `PATCH` 403; `CUSTOMER` 403; invalid hex / non-http
+`logoUrl` → 400; `TripSearchResult` carries `branding`. In a real browser
+as `demo-operator-admin`: the Branding tab loads the raw values, the live
+preview tracks the colour inputs, and after save the **whole staff app**
+(header wordmark + logo, nav, links, buttons, focus rings) picks up the
+operator's teal/orange. `OperatorBrandingIntegrationTest` +
+`TenantIsolationIntegrationTest` (branding invisible to / unaffected by
+another operator) cover it - compile clean, same Testcontainers caveat.
+Demo branding reset afterward, `operator_settings` left empty.
+
 ## Refund & cancellation
 
 Two cancellation endpoints, both in `CancellationController`, kept separate

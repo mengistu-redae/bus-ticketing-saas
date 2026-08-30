@@ -417,6 +417,25 @@ export function useUpdateOperatorSettings() {
   });
 }
 
+// ---- operator branding (operator_admin writes; agent reads for the workspace theme) ----
+// GET/PATCH /api/operator/branding - its own endpoint, disjoint from the
+// full-replace PATCH /api/fleet/settings (see OperatorBrandingController).
+
+export function useOperatorBranding() {
+  return useQuery({ queryKey: ['operator', 'branding'], queryFn: () => apiGet('/api/operator/branding') });
+}
+
+export function useUpdateOperatorBranding() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPatch('/api/operator/branding', body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['operator', 'branding'] }); // BrandingProvider theme
+      queryClient.invalidateQueries({ queryKey: ['fleet', 'settings'] });    // the Branding tab's raw source
+    },
+  });
+}
+
 // ---- cargo waybills (agent/operator_admin, tenant-scoped) ----
 // /api/cargo/waybills(/{id})(/dispatch|arrive|collect|cancel) - staff-only,
 // see com.bustix.cargo.CargoWaybillController. Every read/mutation here

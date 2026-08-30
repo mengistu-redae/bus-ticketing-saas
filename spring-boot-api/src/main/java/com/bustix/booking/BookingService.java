@@ -4,6 +4,7 @@ import com.bustix.fleet.Route;
 import com.bustix.fleet.RouteRepository;
 import com.bustix.operator.EffectiveOperatorSettings;
 import com.bustix.operator.Operator;
+import com.bustix.operator.OperatorBrandingView;
 import com.bustix.operator.OperatorRepository;
 import com.bustix.operator.OperatorSettingsService;
 import com.bustix.scheduling.Seat;
@@ -167,6 +168,8 @@ public class BookingService {
                 .toList();
 
         EffectiveOperatorSettings settings = operatorSettingsService.resolve(booking.getTenantId());
+        String operatorName = operatorRepository.findById(booking.getTenantId())
+                .map(Operator::getName).orElse(null);
 
         return new BookingTrackingView(
                 booking.getBookingRef(),
@@ -182,6 +185,7 @@ public class BookingService {
                 booking.getTotalAmount(),
                 seatViews,
                 settings.supportPhone(),
-                settings.supportEmail());
+                settings.supportEmail(),
+                OperatorBrandingView.from(settings, operatorName));
     }
 }

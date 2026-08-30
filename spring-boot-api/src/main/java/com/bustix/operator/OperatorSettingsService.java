@@ -69,7 +69,12 @@ public class OperatorSettingsService {
                 row.getSupportEmail(),
                 row.getSupportAddress(),
                 row.getWebsiteUrl(),
-                row.getTicketFooterNote());
+                row.getTicketFooterNote(),
+                row.getDisplayName(),
+                row.getTagline(),
+                row.getBrandColor(),
+                row.getAccentColor(),
+                row.getLogoUrl());
     }
 
     /** {@code GET /api/fleet/settings} - the row (may be null), plus effective and default views. */
@@ -118,6 +123,37 @@ public class OperatorSettingsService {
                 defaultFeeSelfService,
                 defaultFeeCounter,
                 true,
-                null, null, null, null, null);
+                null, null, null, null, null, // contact/ticket
+                null, null, null, null, null); // branding
+    }
+
+    // --- Branding: its own read/write surface, disjoint from the
+    // full-replace PATCH /api/fleet/settings above (see
+    // OperatorBrandingController). Writes only the 5 branding columns on
+    // the same operator_settings row. ---
+
+    /** {@code GET /api/operator/branding} - display-resolved (displayName falls back to the operator name). */
+    public OperatorBrandingView brandingFor(UUID tenantId, String operatorFallbackName) {
+        return OperatorBrandingView.from(resolve(tenantId), operatorFallbackName);
+    }
+
+    /**
+     * {@code PATCH /api/operator/branding} - full replace of the branding
+     * fields only. Creates the row on first call; a null field clears it
+     * (frontend then shows the Bustix default).
+     */
+    @Transactional
+    public OperatorBrandingView updateBranding(UUID tenantId, String operatorFallbackName,
+                                               UpdateOperatorBrandingRequest request) {
+        OperatorSettings row = repository.findByTenantId(tenantId)
+                .orElseGet(() -> new OperatorSettings(tenantId));
+        row.setDisplayName(blankToNull(request.displayName()));
+        row.setTagline(blankToNull(request.tagline()));
+        row.setBrandColor(blankToNull(request.brandColor()));
+        row.setAccentColor(blankToNull(request.accentColor()));
+        row.setLogoUrl(blankToNull(request.logoUrl()));
+        row.setUpdatedAt(Instant.now());
+        repository.save(row);
+        return brandingFor(tenantId, operatorFallbackName);
     }
 }

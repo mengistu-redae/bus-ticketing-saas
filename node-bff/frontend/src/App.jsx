@@ -27,6 +27,7 @@ import OperatorTrips from './pages/operator/Trips.jsx';
 import OperatorRefundPolicies from './pages/operator/RefundPolicies.jsx';
 import OperatorSettingsLayout from './pages/operator/SettingsLayout.jsx';
 import OperatorSettings from './pages/operator/Settings.jsx';
+import OperatorBranding from './pages/operator/Branding.jsx';
 import PlatformOperators from './pages/platform/Operators.jsx';
 import Waybills from './pages/cargo/Waybills.jsx';
 import WaybillDetail from './pages/cargo/WaybillDetail.jsx';
@@ -262,6 +263,7 @@ export default function App() {
           <Route index element={<OperatorSettings />} />
           <Route path="refund-policies" element={<OperatorRefundPolicies />} />
           <Route path="cargo-rates" element={<OperatorCargoRates />} />
+          <Route path="branding" element={<OperatorBranding />} />
         </Route>
         <Route path="/operator/refund-policies" element={<Navigate to="/operator/settings/refund-policies" replace />} />
         <Route path="/operator/cargo-rates" element={<Navigate to="/operator/settings/cargo-rates" replace />} />

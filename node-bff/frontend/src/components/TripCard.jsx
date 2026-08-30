@@ -16,7 +16,14 @@ export default function TripCard({ trip, to }) {
       state={{ trip }}
       className="block rounded-xl border border-slate-200 bg-surface p-4 shadow-sm transition-shadow hover:shadow-md"
     >
-      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">{trip.operatorName}</p>
+      <div className="flex items-center gap-2">
+        {trip.branding?.logoUrl && (
+          <img src={trip.branding.logoUrl} alt="" className="h-4 w-auto max-w-[5rem] object-contain" />
+        )}
+        <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+          {trip.branding?.displayName || trip.operatorName}
+        </p>
+      </div>
       <div className="mt-1 flex items-baseline gap-2">
         <h3 className="text-xl font-semibold text-ink">{trip.origin}</h3>
         <span className="text-ink-muted">&rarr;</span>

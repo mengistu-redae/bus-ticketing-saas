@@ -1,5 +1,7 @@
 package com.bustix.booking;
 
+import com.bustix.operator.OperatorBrandingView;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -27,7 +29,9 @@ public record BookingTrackingView(
     List<SeatView> seats,
     /** Operator support contact from operator_settings - null when not provided. Not sensitive (it's the operator's public contact). */
     String operatorSupportPhone,
-    String operatorSupportEmail
+    String operatorSupportEmail,
+    /** Operator branding (V13) - for the themed tracking result card. */
+    OperatorBrandingView branding
 ) {
     public record SeatView(String seatNo, String passengerName) {
     }

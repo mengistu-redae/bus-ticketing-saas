@@ -28,6 +28,9 @@ export default function OperatorSettingsLayout() {
         <NavLink to="/operator/settings/cargo-rates" className={tabClass}>
           Cargo Rates
         </NavLink>
+        <NavLink to="/operator/settings/branding" className={tabClass}>
+          Branding
+        </NavLink>
       </nav>
       <Outlet />
     </div>

@@ -6,6 +6,7 @@ import com.bustix.fleet.Route;
 import com.bustix.fleet.RouteRepository;
 import com.bustix.operator.EffectiveOperatorSettings;
 import com.bustix.operator.Operator;
+import com.bustix.operator.OperatorBrandingView;
 import com.bustix.operator.OperatorRepository;
 import com.bustix.operator.OperatorSettingsService;
 import com.bustix.refund.RefundCalculator;
@@ -419,6 +420,8 @@ public class CargoWaybillService {
         // which has no waybillNumber to look up here anyway - resolve()
         // tolerates null and returns platform defaults (both contacts null).
         EffectiveOperatorSettings settings = operatorSettingsService.resolve(waybill.getTenantId());
+        String operatorName = waybill.getTenantId() == null ? null
+                : operatorRepository.findById(waybill.getTenantId()).map(Operator::getName).orElse(null);
 
         return new WaybillTrackingView(
                 waybill.getWaybillNumber(),
@@ -431,7 +434,8 @@ public class CargoWaybillService {
                 route != null ? route.getDestination() : null,
                 trip != null ? trip.getDepartureAt() : null,
                 settings.supportPhone(),
-                settings.supportEmail());
+                settings.supportEmail(),
+                OperatorBrandingView.from(settings, operatorName));
     }
 
     private CargoWaybill findOwnedWaybill(UUID waybillId, UUID tenantId) {

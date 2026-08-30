@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { useBranding } from '../theme/BrandingProvider.jsx';
 
 const navLinkClass = ({ isActive }) =>
   `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -13,6 +14,7 @@ const navLinkClass = ({ isActive }) =>
  */
 export default function AppShell() {
   const { user, hasRole } = useAuth();
+  const branding = useBranding();
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -22,8 +24,11 @@ export default function AppShell() {
             is the interim overflow guard. */}
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:gap-x-8">
-            <NavLink to="/" className="text-lg font-bold text-brand">
-              Bustix
+            <NavLink to="/" className="flex items-center gap-2 text-lg font-bold text-brand">
+              {branding?.logoUrl && (
+                <img src={branding.logoUrl} alt="" className="h-7 w-auto max-w-[8rem] object-contain" />
+              )}
+              <span>{branding?.displayName || 'Bustix'}</span>
             </NavLink>
             <nav className="flex flex-wrap items-center gap-1">
               {hasRole('customer') && (

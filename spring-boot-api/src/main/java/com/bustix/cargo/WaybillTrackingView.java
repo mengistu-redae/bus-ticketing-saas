@@ -1,5 +1,7 @@
 package com.bustix.cargo;
 
+import com.bustix.operator.OperatorBrandingView;
+
 import java.time.Instant;
 
 /**
@@ -22,6 +24,8 @@ public record WaybillTrackingView(
     Instant departureAt,
     /** Operator support contact from operator_settings - null when not provided. The operator's own public contact, not sensitive. */
     String operatorSupportPhone,
-    String operatorSupportEmail
+    String operatorSupportEmail,
+    /** Operator branding (V13) - for the themed tracking result card. */
+    OperatorBrandingView branding
 ) {
 }

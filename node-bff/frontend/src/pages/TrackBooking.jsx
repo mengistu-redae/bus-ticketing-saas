@@ -4,6 +4,7 @@ import { ApiError } from '../api/client.js';
 import StatusPill from '../components/StatusPill.jsx';
 import Skeleton from '../components/Skeleton.jsx';
 import { formatCurrency, formatDateTime } from '../lib/format.js';
+import { themeVars } from '../lib/color.js';
 
 const inputClass =
   'rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
@@ -78,7 +79,21 @@ export default function TrackBooking() {
       )}
 
       {trackQuery.data && (
-        <div className="rounded-xl border border-slate-200 bg-surface p-5">
+        <div
+          className="overflow-hidden rounded-xl border border-slate-200 bg-surface"
+          style={trackQuery.data.branding ? { ...themeVars(trackQuery.data.branding.brandColor, 'brand'), ...themeVars(trackQuery.data.branding.accentColor, 'accent') } : undefined}
+        >
+          {trackQuery.data.branding && (
+            <div className="flex items-center gap-2 bg-brand px-5 py-2.5 text-white">
+              <img
+                src={trackQuery.data.branding.logoUrl || '/brand/bustix-mark.svg'}
+                alt=""
+                className="h-6 w-auto max-w-[7rem] object-contain"
+              />
+              <span className="text-sm font-semibold">{trackQuery.data.branding.displayName}</span>
+            </div>
+          )}
+          <div className="p-5">
           <div className="mb-4 flex items-center justify-between">
             <span className="font-mono text-xs text-ink-muted">{trackQuery.data.bookingRef}</span>
             <StatusPill status={trackQuery.data.status} />
@@ -122,6 +137,7 @@ export default function TrackBooking() {
               {[trackQuery.data.operatorSupportPhone, trackQuery.data.operatorSupportEmail].filter(Boolean).join(' · ')}
             </p>
           )}
+          </div>
         </div>
       )}
     </div>

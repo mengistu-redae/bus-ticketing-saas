@@ -4,8 +4,21 @@ export default {
   theme: {
     extend: {
       colors: {
-        brand: { DEFAULT: '#1D4ED8', dark: '#1E3A8A', light: '#EFF4FF' },
-        accent: { DEFAULT: '#F59E0B', dark: '#B45309', light: '#FEF3E2' },
+        // brand + accent are runtime-themeable per operator: the values are
+        // CSS custom properties (space-separated RGB channels so Tailwind's
+        // <alpha-value> still works, e.g. ring-brand/20). Defaults live in
+        // src/index.css :root; BrandingProvider overrides them on
+        // document.documentElement for a signed-in operator's staff.
+        brand: {
+          DEFAULT: 'rgb(var(--brand) / <alpha-value>)',
+          dark: 'rgb(var(--brand-dark) / <alpha-value>)',
+          light: 'rgb(var(--brand-light) / <alpha-value>)',
+        },
+        accent: {
+          DEFAULT: 'rgb(var(--accent) / <alpha-value>)',
+          dark: 'rgb(var(--accent-dark) / <alpha-value>)',
+          light: 'rgb(var(--accent-light) / <alpha-value>)',
+        },
         success: { DEFAULT: '#16A34A', light: '#E9F9EF' },
         danger: { DEFAULT: '#DC2626', light: '#FDECEC' },
         warning: { DEFAULT: '#D97706', light: '#FEF3E2' },

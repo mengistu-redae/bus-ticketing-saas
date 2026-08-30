@@ -6,6 +6,7 @@ import com.bustix.fleet.Route;
 import com.bustix.fleet.RouteRepository;
 import com.bustix.operator.EffectiveOperatorSettings;
 import com.bustix.operator.Operator;
+import com.bustix.operator.OperatorBrandingView;
 import com.bustix.operator.OperatorRepository;
 import com.bustix.operator.OperatorSettingsService;
 import com.bustix.tenant.TenantContext;
@@ -236,7 +237,8 @@ public class TripController {
                 settings.supportPhone(),
                 settings.supportEmail(),
                 settings.websiteUrl(),
-                settings.ticketFooterNote());
+                settings.ticketFooterNote(),
+                OperatorBrandingView.from(settings, operatorName));
     }
 
     // --- Below: staff-scoped fleet management, not the marketplace search above. ---

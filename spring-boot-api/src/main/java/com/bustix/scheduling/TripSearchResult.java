@@ -1,5 +1,7 @@
 package com.bustix.scheduling;
 
+import com.bustix.operator.OperatorBrandingView;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -33,6 +35,8 @@ public record TripSearchResult(
     String operatorSupportPhone,
     String operatorSupportEmail,
     String operatorWebsiteUrl,
-    String operatorTicketFooterNote
+    String operatorTicketFooterNote,
+    /** Operator branding (V13) - displayName falls back to operatorName; colours/logo null when unset. */
+    OperatorBrandingView branding
 ) {
 }

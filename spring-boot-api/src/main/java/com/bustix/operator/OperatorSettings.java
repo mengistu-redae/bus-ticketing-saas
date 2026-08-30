@@ -78,6 +78,28 @@ public class OperatorSettings {
     @Column(name = "ticket_footer_note")
     private String ticketFooterNote;
 
+    // --- Branding (V13). All nullable; null = use the Bustix default,
+    // which the frontend applies (the platform stores no fallback). ---
+
+    /** Customer-facing name; null falls back to operators.name. */
+    @Column(name = "display_name")
+    private String displayName;
+
+    @Column(name = "tagline")
+    private String tagline;
+
+    /** '#RRGGBB'. */
+    @Column(name = "brand_color")
+    private String brandColor;
+
+    /** '#RRGGBB'. */
+    @Column(name = "accent_color")
+    private String accentColor;
+
+    /** URL/path to the operator's logo - not the image itself. */
+    @Column(name = "logo_url")
+    private String logoUrl;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 

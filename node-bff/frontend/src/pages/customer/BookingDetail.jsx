@@ -8,6 +8,7 @@ import BoardingPassQr from '../../components/BoardingPassQr.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import ErrorBanner from '../../components/ErrorBanner.jsx';
 import { formatCurrency, formatDateTime } from '../../lib/format.js';
+import { themeVars } from '../../lib/color.js';
 
 export default function BookingDetail() {
   const { bookingId } = useParams();
@@ -86,14 +87,33 @@ export default function BookingDetail() {
         <StatusPill status={status} />
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-surface p-5">
+      {/* Operator brand colour is scoped to this single card - the ticket
+          is one operator's, but My Bookings can span operators. */}
+      <div
+        className="overflow-hidden rounded-xl border border-slate-200 bg-surface"
+        style={trip?.branding ? { ...themeVars(trip.branding.brandColor, 'brand'), ...themeVars(trip.branding.accentColor, 'accent') } : undefined}
+      >
+        {trip?.branding && (
+          <div className="flex items-center gap-2 bg-brand px-5 py-2.5 text-white">
+            <img
+              src={trip.branding.logoUrl || '/brand/bustix-mark.svg'}
+              alt=""
+              className="h-6 w-auto max-w-[7rem] object-contain"
+            />
+            <span className="text-sm font-semibold">{trip.branding.displayName}</span>
+            {trip.branding.tagline && (
+              <span className="text-xs text-white/80">· {trip.branding.tagline}</span>
+            )}
+          </div>
+        )}
+        <div className="p-5">
         {trip ? (
           <>
             <p className="text-lg font-semibold text-ink">
               {trip.origin} <span className="text-ink-muted">&rarr;</span> {trip.destination}
             </p>
             <p className="text-sm text-ink-muted">
-              {trip.operatorName} · Departs {formatDateTime(trip.departureAt)}
+              {trip.branding?.displayName || trip.operatorName} · Departs {formatDateTime(trip.departureAt)}
             </p>
           </>
         ) : (
@@ -181,6 +201,7 @@ export default function BookingDetail() {
             {trip.operatorTicketFooterNote && <p className="mt-1">{trip.operatorTicketFooterNote}</p>}
           </div>
         )}
+        </div>
       </div>
 
       {!authenticated && (

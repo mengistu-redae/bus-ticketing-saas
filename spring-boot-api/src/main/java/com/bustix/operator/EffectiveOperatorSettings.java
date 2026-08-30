@@ -7,8 +7,8 @@ import java.math.BigDecimal;
  * {@link OperatorSettings} has been merged with its platform-wide
  * application.yml default - see {@link OperatorSettingsService#resolve}.
  * Every field here is fully resolved (never null for the business values);
- * the contact/ticket strings can still be null when the operator has not
- * provided them.
+ * the contact/ticket and branding strings can still be null when the
+ * operator has not provided them.
  */
 public record EffectiveOperatorSettings(
     BigDecimal vatRate,
@@ -21,6 +21,12 @@ public record EffectiveOperatorSettings(
     String supportEmail,
     String supportAddress,
     String websiteUrl,
-    String ticketFooterNote
+    String ticketFooterNote,
+    // Branding (V13) - null when unset; the frontend applies the Bustix default.
+    String displayName,
+    String tagline,
+    String brandColor,
+    String accentColor,
+    String logoUrl
 ) {
 }

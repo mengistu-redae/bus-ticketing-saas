@@ -224,6 +224,31 @@ class TenantIsolationIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.effective.vatRate").value(0.07));
     }
 
+    @Test
+    void oneOperatorsBrandingIsInvisibleToAndUnaffectedByAnother() throws Exception {
+        twoOperators();
+
+        mockMvc.perform(patch("/api/operator/branding").with(asOperatorAdmin("iso-a-admin", orgA()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Operator A Lines\",\"brandColor\":\"#0F766E\"}"))
+                .andExpect(status().isOk());
+
+        // B sees only its own (unset -> its legal name), never A's override.
+        mockMvc.perform(get("/api/operator/branding").with(asOperatorAdmin("iso-b-admin", orgB())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Operator B"))
+                .andExpect(jsonPath("$.brandColor").doesNotExist());
+
+        mockMvc.perform(patch("/api/operator/branding").with(asOperatorAdmin("iso-b-admin", orgB()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"brandColor\":\"#DC2626\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/operator/branding").with(asOperatorAdmin("iso-a-admin", orgA())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Operator A Lines"))
+                .andExpect(jsonPath("$.brandColor").value("#0F766E"));
+    }
+
     // ---- Cargo waybill lifecycle ----
 
     @Test
