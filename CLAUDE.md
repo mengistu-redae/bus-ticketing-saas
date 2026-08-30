@@ -1683,6 +1683,18 @@ New `lib/format.js` helpers: `toDateInputValue`, `startOfLocalDayIso`,
 `formatDayLabel`. Verified live on both `/search` (guest) and
 `/agent/search` (Sky Bus agent).
 
+**Swap origin/destination (2026-08-30, same session):** the two near-
+duplicate search forms in `Home.jsx` / `agent/Search.jsx` were extracted to
+one `components/TripSearchForm.jsx` (fields + URL pre-fill + navigate;
+`resultsPath` + `className` props are the only difference - same move as
+`TripSearchView` for the two results pages). It carries a round-arrow swap
+button between From and To (`self-end` desktop / `self-center` + icon
+`rotate-90` mobile, `hover:rotate-180`) that swaps the two state values;
+disabled when both are empty. `TripSearchView`'s results header gained the
+same swap on the `origin -> destination` line - it `setSearchParams` with
+the two reversed ("now show me the return trip"), which re-runs the lane
+fetch and (via the existing effect) resets filters/sort. Verified live.
+
 **Two more real bugs found live 2026-08-24, using the customer flow as an
 actual user rather than through curl:**
 

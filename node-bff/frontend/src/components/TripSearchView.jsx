@@ -62,6 +62,14 @@ export default function TripSearchView({ tripLinkBase, editSearchTo, scoped = fa
     setSearchParams(next);
   }
 
+  // Reverse the route - "now show me the return trip".
+  function swapDirection() {
+    const next = new URLSearchParams(searchParams);
+    next.set('origin', destination);
+    next.set('destination', origin);
+    setSearchParams(next);
+  }
+
   // Both hooks are always called (stable hook order); only the one matching
   // `scoped` is enabled, so exactly one network request goes out.
   const marketplaceQuery = useLaneTripSearch({ origin, destination, departureAfter }, !scoped);
@@ -111,9 +119,34 @@ export default function TripSearchView({ tripLinkBase, editSearchTo, scoped = fa
 
   return (
     <div>
-      <div className="mb-4 flex items-baseline gap-2">
-        <h1 className="text-2xl font-bold text-ink">
-          {origin} <span className="text-ink-muted">&rarr;</span> {destination}
+      <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-ink">
+          {origin}
+          <button
+            type="button"
+            onClick={swapDirection}
+            aria-label={`Search ${destination} to ${origin} instead`}
+            title="Reverse route"
+            className="rounded-full p-1 text-ink-muted transition-transform duration-200 hover:rotate-180 hover:text-brand"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="16 3 21 8 16 13" />
+              <line x1="21" y1="8" x2="8" y2="8" />
+              <polyline points="8 21 3 16 8 11" />
+              <line x1="3" y1="16" x2="16" y2="16" />
+            </svg>
+          </button>
+          {destination}
         </h1>
         <Link to={editSearchLink} className="text-sm text-brand hover:underline">
           Edit search
