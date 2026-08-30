@@ -47,6 +47,14 @@ export default function AppShell() {
                   <NavLink to="/agent/bookings" className={navLinkClass}>
                     Bookings
                   </NavLink>
+                  {/* Cargo waybill management - usable by AGENT and
+                      OPERATOR_ADMIN alike (identical backend permissions on
+                      every waybill endpoint). Listed in each role's own
+                      block so its position is right for both (an operator
+                      wants it before the config "Settings" entry). */}
+                  <NavLink to="/cargo" className={navLinkClass}>
+                    Cargo
+                  </NavLink>
                 </>
               )}
               {hasRole('operator_admin') && (
@@ -63,25 +71,17 @@ export default function AppShell() {
                   <NavLink to="/operator/trips" className={navLinkClass}>
                     Trips
                   </NavLink>
-                  <NavLink to="/operator/refund-policies" className={navLinkClass}>
-                    Refund Policies
-                  </NavLink>
-                  <NavLink to="/operator/cargo-rates" className={navLinkClass}>
-                    Cargo Rates
-                  </NavLink>
+                  {!hasRole('agent') && (
+                    <NavLink to="/cargo" className={navLinkClass}>
+                      Cargo
+                    </NavLink>
+                  )}
+                  {/* Config hub - Refund Policies and Cargo Rates are tabs
+                      inside this page now, not separate nav entries. */}
                   <NavLink to="/operator/settings" className={navLinkClass}>
                     Settings
                   </NavLink>
                 </>
-              )}
-              {/* Cargo waybill management is usable by AGENT and
-                  OPERATOR_ADMIN alike (identical backend permissions on
-                  every waybill endpoint) - a combined condition rather
-                  than duplicating this link inside both blocks above. */}
-              {(hasRole('agent') || hasRole('operator_admin')) && (
-                <NavLink to="/cargo" className={navLinkClass}>
-                  Cargo
-                </NavLink>
               )}
               {hasRole('platform_admin') && (
                 <>

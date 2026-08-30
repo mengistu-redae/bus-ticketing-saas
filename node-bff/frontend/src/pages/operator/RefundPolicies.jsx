@@ -100,7 +100,6 @@ export default function OperatorRefundPolicies() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold text-ink">Refund Policies</h1>
       <p className="mb-6 text-sm text-ink-muted">
         Tiers are matched by hours-before-departure, highest cutoff first. A route-specific policy overrides the
         operator-wide default for that route only. No policy configured means a 0% refund.

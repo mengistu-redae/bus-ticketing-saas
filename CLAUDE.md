@@ -1082,6 +1082,22 @@ notification behaviour.
   skipped, same guard as every other notification write. A price-only edit
   and the `DELETE` (cancel) path notify nobody - the broader "trip
   lifecycle transitions" work is still separate.
+- **Frontend: `/operator/settings` is the operator config hub.** Adding
+  Settings brought the flat `operator_admin` nav to 8 items mixing fleet
+  CRUD, config, and the cargo waybill workspace; it was consolidated the
+  same day (2026-08-30) down to `Dashboard · Buses · Routes · Trips ·
+  Cargo · Settings` (6). `pages/operator/SettingsLayout.jsx` renders a tab
+  bar (`General` / `Refund Policies` / `Cargo Rates`) over `<Outlet/>`;
+  the three tabs are child routes of `/operator/settings` (still
+  deep-linkable), `General` = `Settings.jsx` (the `PATCH /api/fleet/settings`
+  form), the other two = the unchanged `RefundPolicies.jsx` /
+  `CargoRates.jsx` pages (just their top-level `<h1>` dropped - the tab
+  labels them now). The old top-level paths
+  `/operator/{refund-policies,cargo-rates}` `<Navigate replace>` into the
+  tabs so existing links/bookmarks still work. `RefundPolicyController` /
+  `CargoRateController` (`/api/fleet/refund-policies`,
+  `/api/fleet/cargo-rates`) are **unchanged** - this was frontend-only.
+  Supersedes the Phase 3 note's "four direct links, no sub-nav" claim.
 
 Verified live end-to-end against the running dev stack (`V12` applied,
 Hibernate `validate` passed on boot): `GET` returns defaults with
@@ -1098,7 +1114,9 @@ left empty. `OperatorSettingsIntegrationTest` /
 `BookingIntegrationTest` (VAT override) and `TenantIsolationIntegrationTest`
 (one operator's settings invisible to / unaffected by another) cover it -
 compile clean, same Testcontainers-unrun-on-this-machine caveat as the
-rest of the suite.
+rest of the suite. The config-hub consolidation was verified in a real
+browser as `demo-operator-admin`: the 6-item nav, all three tabs
+rendering their full CRUD UIs, deep-links, and the old-path redirects.
 
 ## Refund & cancellation
 

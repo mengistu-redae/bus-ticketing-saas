@@ -27,11 +27,12 @@ function overridesToForm(o) {
 }
 
 /**
- * operator_admin settings: GET/PATCH /api/fleet/settings. A singleton per
- * operator - one form, not a list. Each business-value field left blank
- * falls back to the platform default shown beside it (PATCH is a full
- * replace of the override set - see OperatorSettingsController). Contact /
- * ticket-footer fields are shown on tickets and tracking pages.
+ * "General" tab of the operator config hub (see SettingsLayout) -
+ * GET/PATCH /api/fleet/settings. A singleton per operator: one form, not a
+ * list. Each business-value field left blank falls back to the platform
+ * default shown beside it (PATCH is a full replace of the override set -
+ * see OperatorSettingsController). Contact / ticket-footer fields are shown
+ * on tickets and tracking pages.
  */
 export default function OperatorSettings() {
   const { data, isLoading, isError, error, refetch } = useOperatorSettings();
@@ -88,9 +89,8 @@ export default function OperatorSettings() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="mb-1 text-2xl font-bold text-ink">Settings</h1>
       <p className="mb-6 text-sm text-ink-muted">
-        Overrides for your operator. Leave a value blank to use the platform default shown beside it.
+        Business rules and contact details for your operator. Leave a value blank to use the platform default shown beside it.
       </p>
 
       <form onSubmit={handleSave} className="flex flex-col gap-6">

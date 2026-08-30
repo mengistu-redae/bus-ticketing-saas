@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Link } from 'react-router-dom';
+import { Routes, Route, Link, Navigate } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext.jsx';
 import RequireRole from './auth/RequireRole.jsx';
 import AppShell from './layout/AppShell.jsx';
@@ -25,6 +25,7 @@ import OperatorBuses from './pages/operator/Buses.jsx';
 import OperatorRoutes from './pages/operator/Routes.jsx';
 import OperatorTrips from './pages/operator/Trips.jsx';
 import OperatorRefundPolicies from './pages/operator/RefundPolicies.jsx';
+import OperatorSettingsLayout from './pages/operator/SettingsLayout.jsx';
 import OperatorSettings from './pages/operator/Settings.jsx';
 import PlatformOperators from './pages/platform/Operators.jsx';
 import Waybills from './pages/cargo/Waybills.jsx';
@@ -247,22 +248,23 @@ export default function App() {
             </RequireRole>
           }
         />
-        <Route
-          path="/operator/refund-policies"
-          element={
-            <RequireRole role="operator_admin">
-              <OperatorRefundPolicies />
-            </RequireRole>
-          }
-        />
+        {/* Operator config hub - "Settings" is the single nav entry; Refund
+            Policies and Cargo Rates are tabs (their own child routes, still
+            deep-linkable). The old top-level paths redirect in (below). */}
         <Route
           path="/operator/settings"
           element={
             <RequireRole role="operator_admin">
-              <OperatorSettings />
+              <OperatorSettingsLayout />
             </RequireRole>
           }
-        />
+        >
+          <Route index element={<OperatorSettings />} />
+          <Route path="refund-policies" element={<OperatorRefundPolicies />} />
+          <Route path="cargo-rates" element={<OperatorCargoRates />} />
+        </Route>
+        <Route path="/operator/refund-policies" element={<Navigate to="/operator/settings/refund-policies" replace />} />
+        <Route path="/operator/cargo-rates" element={<Navigate to="/operator/settings/cargo-rates" replace />} />
         <Route
           path="/platform/operators"
           element={
@@ -286,14 +288,6 @@ export default function App() {
           element={
             <RequireRole roles={['agent', 'operator_admin']}>
               <WaybillDetail />
-            </RequireRole>
-          }
-        />
-        <Route
-          path="/operator/cargo-rates"
-          element={
-            <RequireRole role="operator_admin">
-              <OperatorCargoRates />
             </RequireRole>
           }
         />

@@ -94,7 +94,6 @@ export default function OperatorCargoRates() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold text-ink">Cargo Rates</h1>
       <p className="mb-6 text-sm text-ink-muted">
         A route-specific rate overrides the operator-wide default for that route only. Unlike refund policies, a
         missing rate blocks waybill creation on that route rather than defaulting to free.
