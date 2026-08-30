@@ -56,8 +56,13 @@ export default function AgentBookingDetail() {
 
   async function handleCheckIn(seatId) {
     setCheckInError(null);
+    const presented = (presentedId[seatId] || '').trim();
+    if (!presented) {
+      setCheckInError('Enter the ID number the passenger presented at the gate before checking in.');
+      return;
+    }
     try {
-      await checkIn.mutateAsync({ seatId, presentedIdNumber: (presentedId[seatId] || '').trim() });
+      await checkIn.mutateAsync({ seatId, presentedIdNumber: presented });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setCheckInError(err.message || "Presented ID doesn't match the ID on file, or boarding has closed for this trip.");
@@ -86,8 +91,18 @@ export default function AgentBookingDetail() {
     event.preventDefault();
     setPaymentError(null);
     const amount = Number(paymentAmount);
-    if (!paymentAmount || Number.isNaN(amount) || amount < 0) {
+    if (!paymentAmount || Number.isNaN(amount) || amount <= 0) {
       setPaymentError('Enter a valid amount.');
+      return;
+    }
+    const alreadyCollected = (paymentsQuery.data || []).reduce((sum, p) => sum + Number(p.amount), 0);
+    const due = Number(booking.totalAmount) - alreadyCollected;
+    if (due <= 0.005) {
+      setPaymentError('This booking is already paid in full.');
+      return;
+    }
+    if (amount - due > 0.005) {
+      setPaymentError(`Amount exceeds the ${formatCurrency(due)} balance due.`);
       return;
     }
     try {
@@ -203,7 +218,7 @@ export default function AgentBookingDetail() {
                           <button
                             type="button"
                             onClick={() => handleCheckIn(s.seatId)}
-                            disabled={checkIn.isPending}
+                            disabled={checkIn.isPending || !(presentedId[s.seatId] || '').trim()}
                             className="rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
                           >
                             Check in
@@ -246,7 +261,9 @@ export default function AgentBookingDetail() {
             <h2 className="text-sm font-semibold text-ink">Payments</h2>
             <span className="text-sm text-ink-muted">
               Collected {formatCurrency(collected)} of {formatCurrency(booking.totalAmount)}
-              {balanceDue > 0 && <span className="text-warning"> · {formatCurrency(balanceDue)} due</span>}
+              {balanceDue > 0.005
+                ? <span className="text-warning"> · {formatCurrency(balanceDue)} due</span>
+                : <span className="text-success"> · paid in full</span>}
             </span>
           </div>
 
@@ -284,6 +301,7 @@ export default function AgentBookingDetail() {
                 type="number"
                 min="0"
                 step="0.01"
+                max={balanceDue > 0.005 ? balanceDue.toFixed(2) : undefined}
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
                 className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
@@ -301,7 +319,7 @@ export default function AgentBookingDetail() {
             )}
             <button
               type="submit"
-              disabled={createPayment.isPending}
+              disabled={createPayment.isPending || balanceDue <= 0.005}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {createPayment.isPending ? 'Recording…' : 'Record payment'}

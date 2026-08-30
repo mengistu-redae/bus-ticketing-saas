@@ -177,8 +177,18 @@ export default function WaybillDetail() {
     event.preventDefault();
     setPaymentError(null);
     const amount = Number(paymentAmount);
-    if (!paymentAmount || Number.isNaN(amount) || amount < 0) {
+    if (!paymentAmount || Number.isNaN(amount) || amount <= 0) {
       setPaymentError('Enter a valid amount.');
+      return;
+    }
+    const alreadyCollected = (paymentsQuery.data || []).reduce((sum, p) => sum + Number(p.amount), 0);
+    const due = Number(waybill.totalCargoCost) - alreadyCollected;
+    if (due <= 0.005) {
+      setPaymentError('This waybill is already paid in full.');
+      return;
+    }
+    if (amount - due > 0.005) {
+      setPaymentError(`Amount exceeds the ${formatCurrency(due)} balance due.`);
       return;
     }
     try {
@@ -435,7 +445,9 @@ export default function WaybillDetail() {
             <h2 className="text-sm font-semibold text-ink">Payments</h2>
             <span className="text-sm text-ink-muted">
               Collected {formatCurrency(collected)} of {formatCurrency(waybill.totalCargoCost)}
-              {balanceDue > 0 && <span className="text-warning"> · {formatCurrency(balanceDue)} due</span>}
+              {balanceDue > 0.005
+                ? <span className="text-warning"> · {formatCurrency(balanceDue)} due</span>
+                : <span className="text-success"> · paid in full</span>}
             </span>
           </div>
 
@@ -473,6 +485,7 @@ export default function WaybillDetail() {
                 type="number"
                 min="0"
                 step="0.01"
+                max={balanceDue > 0.005 ? balanceDue.toFixed(2) : undefined}
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
                 className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
@@ -490,7 +503,7 @@ export default function WaybillDetail() {
             )}
             <button
               type="submit"
-              disabled={createPayment.isPending}
+              disabled={createPayment.isPending || balanceDue <= 0.005}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {createPayment.isPending ? 'Recording…' : 'Record payment'}
