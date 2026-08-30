@@ -15,6 +15,9 @@ public interface TripRepository extends JpaRepository<Trip, UUID> {
     // Staff-scoped.
     List<Trip> findAllByTenantId(UUID tenantId);
 
+    /** Operator "Trips" management page - the "upcoming" (status=scheduled) and "cancelled" filter buckets. */
+    List<Trip> findAllByTenantIdAndStatus(UUID tenantId, String status);
+
     Optional<Trip> findByIdAndTenantId(UUID id, UUID tenantId);
 
     // Customer-scoped cross-tenant search: trips for any route, departing

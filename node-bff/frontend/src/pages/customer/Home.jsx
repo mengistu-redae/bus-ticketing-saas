@@ -1,18 +1,24 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import LocationAutocomplete from '../../components/LocationAutocomplete.jsx';
 import StatusPill from '../../components/StatusPill.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import { useMyDashboard } from '../../api/queries.js';
-import { formatDateTime } from '../../lib/format.js';
+import { formatDateTime, toDateInputValue } from '../../lib/format.js';
 
 export default function Home() {
   const navigate = useNavigate();
   const { authenticated, hasRole } = useAuth();
-  const [origin, setOrigin] = useState('');
-  const [destination, setDestination] = useState('');
-  const [departureDate, setDepartureDate] = useState('');
+  // Pre-fill from the query string so "Edit search" on the results page
+  // comes back with the previous entries intact, not a blank form.
+  const [searchParams] = useSearchParams();
+  const [origin, setOrigin] = useState(() => searchParams.get('origin') || '');
+  const [destination, setDestination] = useState(() => searchParams.get('destination') || '');
+  const [departureDate, setDepartureDate] = useState(() => {
+    const after = searchParams.get('departureAfter');
+    return after ? toDateInputValue(new Date(after)) : '';
+  });
 
   function handleSubmit(event) {
     event.preventDefault();

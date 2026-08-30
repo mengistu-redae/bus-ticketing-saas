@@ -1,20 +1,31 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import LocationAutocomplete from '../../components/LocationAutocomplete.jsx';
+import { toDateInputValue } from '../../lib/format.js';
 
 /**
- * The agent/counter portal's entry point - same search API as the customer
- * Home page (GET /api/trips/search, cross-tenant by design, see
- * TripController) but landing an agent in the counter booking flow
+ * The agent/counter portal's entry point - the same search form as the
+ * customer Home page, landing an agent in the counter booking flow
  * (/agent/...) rather than the customer one, so the walk-in booking they
  * create is attributed as channel=counter (decided server-side from the
  * caller's JWT role, not anything sent from here - see BookingController).
+ * The results page (AgentSearchResults) queries GET /api/fleet/trips/search
+ * - the agent's OWN operator only, since a counter agent can't sell another
+ * operator's trips. The From/To autocomplete still uses the cross-operator
+ * /api/trips/locations (there's no tenant-scoped city list); a city only
+ * another operator serves just yields "No trips found".
  */
 export default function AgentSearch() {
   const navigate = useNavigate();
-  const [origin, setOrigin] = useState('');
-  const [destination, setDestination] = useState('');
-  const [departureDate, setDepartureDate] = useState('');
+  // Pre-fill from the query string so "Edit search" on the results page
+  // keeps the previous entries instead of clearing the form.
+  const [searchParams] = useSearchParams();
+  const [origin, setOrigin] = useState(() => searchParams.get('origin') || '');
+  const [destination, setDestination] = useState(() => searchParams.get('destination') || '');
+  const [departureDate, setDepartureDate] = useState(() => {
+    const after = searchParams.get('departureAfter');
+    return after ? toDateInputValue(new Date(after)) : '';
+  });
 
   function handleSubmit(event) {
     event.preventDefault();

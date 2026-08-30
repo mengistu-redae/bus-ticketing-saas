@@ -112,9 +112,9 @@ class TripSearchIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$", hasSize(1)));
     }
 
-    // --- GET /api/fleet/trips/search - the operator-scoped mirror. An
-    // operator only ever searches its own inventory; customers/guests/agents
-    // keep using the cross-operator marketplace search above.
+    // --- GET /api/fleet/trips/search - the operator-scoped mirror. Operator
+    // staff (OPERATOR_ADMIN / AGENT) only ever search their own inventory;
+    // customers/guests keep using the cross-operator marketplace search above.
 
     @Test
     void operatorSearchReturnsOnlyTheCallingOperatorsOwnTrips() throws Exception {
@@ -142,13 +142,24 @@ class TripSearchIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void operatorSearchIsOperatorAdminOnly() throws Exception {
-        Operator operator = createOperator("fleet-search-role-" + UUID.randomUUID(), "Role Co");
+    void operatorSearchIsStaffOnlyAndTenantScopedForAgentsToo() throws Exception {
+        Operator operatorA = createOperator("fleet-search-role-a-" + UUID.randomUUID(), "Role Co A");
+        Operator operatorB = createOperator("fleet-search-role-b-" + UUID.randomUUID(), "Role Co B");
 
+        var busB = createBus(operatorB.getId(), "RCB-1", 40, "2x2");
+        var routeB = createRoute(operatorB.getId(), "Addis Ababa", "Dessie");
+        createTrip(operatorB.getId(), routeB.getId(), busB.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("400.00"));
+
+        // An agent CAN use it now (widened 2026-08-30), but only ever sees
+        // their own operator - operator A's agent sees none of operator B's trips.
         mockMvc.perform(get("/api/fleet/trips/search")
                         .param("origin", "Addis Ababa").param("destination", "Dessie")
-                        .with(asAgent("agent-1", operator.getKeycloakOrgId())))
-                .andExpect(status().isForbidden());
+                        .with(asAgent("agent-a", operatorA.getKeycloakOrgId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        // A customer still can't reach it at all.
         mockMvc.perform(get("/api/fleet/trips/search")
                         .param("origin", "Addis Ababa").param("destination", "Dessie")
                         .with(asCustomer("customer-1")))

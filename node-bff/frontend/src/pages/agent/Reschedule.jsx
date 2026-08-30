@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useAgentBooking, useRescheduleBooking, useTrip, useTripSearch, useTripSeats } from '../../api/queries.js';
+import { useAgentBooking, useFleetTripSearch, useRescheduleBooking, useTrip, useTripSeats } from '../../api/queries.js';
 import { ApiError } from '../../api/client.js';
 import SeatMap from '../../components/SeatMap.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
@@ -18,7 +18,10 @@ export default function AgentReschedule() {
   const currentTripQuery = useTrip(booking?.tripId);
   const currentTrip = currentTripQuery.data;
 
-  const candidatesQuery = useTripSearch(
+  // Tenant-scoped: a reschedule can't move a booking to another operator's
+  // trip (BookingRescheduleService throws TenantMismatchException), so the
+  // candidate list is the agent's own operator only.
+  const candidatesQuery = useFleetTripSearch(
     { origin: currentTrip?.origin, destination: currentTrip?.destination },
     Boolean(currentTrip),
   );

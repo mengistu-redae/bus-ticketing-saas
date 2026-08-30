@@ -74,6 +74,25 @@ export function useTripSearch({ origin, destination, departureAfter, page = 0, s
   });
 }
 
+// The whole lane in one request - the results page (TripSearchView) filters,
+// sorts, categorises and re-paginates client-side, so it wants every
+// scheduled trip on the route up front, not a server page. size=200 is well
+// under the backend's 300 ceiling; data.totalCount still flags if a lane
+// somehow exceeds it.
+const LANE_PAGE_SIZE = 200;
+
+export function useLaneTripSearch({ origin, destination, departureAfter }, enabled) {
+  return useTripSearch({ origin, destination, departureAfter, page: 0, size: LANE_PAGE_SIZE }, enabled);
+}
+
+// The whole lane, tenant-scoped - the agent /agent/search results page. A
+// counter agent can only sell their own operator's trips (BookingService
+// throws TenantMismatchException / 403 otherwise), so their search must be
+// scoped to that operator, not the cross-operator marketplace.
+export function useFleetLaneTripSearch({ origin, destination, departureAfter }, enabled) {
+  return useFleetTripSearch({ origin, destination, departureAfter, page: 0, size: LANE_PAGE_SIZE }, enabled);
+}
+
 // Backs the From/To autocomplete dropdown (LocationAutocomplete) - the
 // component itself debounces keystrokes before this ever fires, so no
 // debouncing here; query is disabled below 2 characters, matching the
@@ -369,11 +388,33 @@ export function useFleetTripSearch({ origin, destination, departureAfter, page =
   });
 }
 
+/**
+ * The operator "Trips" management list - GET /api/fleet/trips/manage.
+ * Denormalized (route/bus names, seat occupancy), filtered
+ * (status: upcoming|all|cancelled) and paged, unlike useFleetTrips() which
+ * is the bare all-trips list the cargo trip-picker uses.
+ */
+export function useFleetTripsManage({ status = 'upcoming', routeId, page = 0, size = 20 }) {
+  const params = new URLSearchParams({ status, page: String(page), size: String(size) });
+  if (routeId) params.set('routeId', routeId);
+  return useQuery({
+    queryKey: ['fleet', 'trips', 'manage', status, routeId || null, page, size],
+    queryFn: () => apiGetWithCount(`/api/fleet/trips/manage?${params.toString()}`),
+    placeholderData: keepPreviousData,
+  });
+}
+
+// A trip create / edit / cancel changes both the bare list (cargo picker) and
+// the manage list (operator Trips page).
+function invalidateTrips(queryClient) {
+  queryClient.invalidateQueries({ queryKey: ['fleet', 'trips'] });
+}
+
 export function useCreateTrip() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body) => apiPost('/api/fleet/trips', body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'trips'] }),
+    onSuccess: () => invalidateTrips(queryClient),
   });
 }
 
@@ -381,7 +422,7 @@ export function useUpdateTrip() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ tripId, ...body }) => apiPatch(`/api/fleet/trips/${tripId}`, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'trips'] }),
+    onSuccess: () => invalidateTrips(queryClient),
   });
 }
 
@@ -390,7 +431,7 @@ export function useCancelTrip() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (tripId) => apiDelete(`/api/fleet/trips/${tripId}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'trips'] }),
+    onSuccess: () => invalidateTrips(queryClient),
   });
 }
 

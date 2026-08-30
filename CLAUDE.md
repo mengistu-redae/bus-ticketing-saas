@@ -159,16 +159,36 @@ unindexed).
 Staff-facing endpoints for managing one operator's own routes/buses/trips use
 the tenant-scoped finders instead. Both are wired up:
 `GET /api/trips/search?origin=...&destination=...&departureAfter=...&page=&size=`
-(`permitAll()` - guest/customer/agent, `TripController.search`) is the
+(`permitAll()` - guest/customer, `TripController.search`) is the
 **cross-operator** marketplace read; **`GET /api/fleet/trips/search`**
-(same params, `OPERATOR_ADMIN` only, `TripController.operatorSearch`, added
-2026-08-30) is its **tenant-scoped** mirror - an operator only ever
-searches its own inventory (agents keep using the cross-operator one). Both
-share `paginatedTripSearch(...)`; the only difference is the route finder
-(`findAllByTenantId...ActiveTrue` vs the un-scoped one). The operator search
-is also what surfaces per-trip seat availability, which the bare `Trip`
-rows from `GET /api/fleet/trips` don't carry - `pages/operator/Trips.jsx`
-has a "Find trips on route" bar over it.
+(same params, `TripController.operatorSearch`, added 2026-08-30) is its
+**tenant-scoped** mirror - operator staff only ever search their own
+inventory. Originally `OPERATOR_ADMIN` only; **widened to
+`hasAnyRole('OPERATOR_ADMIN', 'AGENT')` on 2026-08-30** - a counter agent
+can only sell their own operator's trips (`BookingService` throws
+`TenantMismatchException` / 403 on a cross-operator counter booking), so
+showing them the cross-operator marketplace was a dead end. `/agent/search`
+and the agent reschedule candidate list now both hit this scoped endpoint;
+customers/guests still use the marketplace one. Same precedent as
+`GET /api/fleet/{trips,routes}` (list), already `OPERATOR_ADMIN`+`AGENT`.
+Both share `paginatedTripSearch(...)`; the only difference is the route
+finder (`findAllByTenantId...ActiveTrue` vs the un-scoped one).
+
+**`GET /api/fleet/trips/manage`** (`OPERATOR_ADMIN`,
+`TripController.manageList`, added 2026-08-30) is a **third** trips-under-
+fleet endpoint - the operator "Trips" page list. Returns `OperatorTripView`
+(denormalized: route origin/destination, bus plate/`busCapacity`,
+`availableSeats`/`bookedSeats`) + `X-Total-Count`, filtered by `status`
+(`upcoming` default = scheduled & not departed / `all` / `cancelled`) and
+optional `routeId`, in-memory paged like `paginatedTripSearch`. New derived
+finder `TripRepository.findAllByTenantIdAndStatus`. This replaced the old
+`pages/operator/Trips.jsx` design (unpaginated `GET /api/fleet/trips` list +
+a separate "Find trips on route" seat-availability form): the page is now
+one paged/filtered list with occupancy on every row, an inline cancel
+confirm ("existing bookings are not refunded or notified"), per-row errors,
+and `CreateTripRequest` gained an `@AssertTrue` that `arrivalAt` is after
+`departureAt`. `GET /api/fleet/trips` (bare `Trip` list) is **unchanged** -
+the cargo waybill pages still use it as an all-trips lookup.
 `GET/POST/PATCH/DELETE /api/fleet/{buses,routes,trips}(/{id})`
 (`OPERATOR_ADMIN` only, `BusController`/`RouteController`/`TripController`)
 is how an operator's own fleet data gets created, listed, read one at a
@@ -1526,10 +1546,11 @@ rows toggle into an inline edit form in place rather than a modal/dialog -
 no such component exists anywhere else in this app either, so this keeps
 the pattern consistent) against
 `/api/fleet/{buses,routes,trips,refund-policies}`. `Trips.jsx` additionally
-loads the buses/routes lists (already needed for its own create-trip
-dropdowns) to resolve `routeId`/`busId` to display names client-side, since
-`GET /api/fleet/trips` returns bare `Trip` rows, not a denormalized shape
-like the customer-facing `TripSearchResult`. `RefundPolicies.jsx` is the
+loads the routes/buses lists for its create-trip dropdowns and the route
+filter (**reworked 2026-08-30** to a paged/filtered list off
+`GET /api/fleet/trips/manage` - see the "Marketplace exception" section
+above; the list rows are denormalized now, no more client-side
+`routeById`/`busById` lookup). `RefundPolicies.jsx` is the
 one page that has to translate on the way in and out: `RefundTier`'s
 `@JsonProperty` means the API's `tiers` are snake_case
 (`cutoff_hours`/`refund_percent`) on the wire, converted to/from this
@@ -1575,6 +1596,92 @@ since `DELETE` here only soft-deactivates).
 This completes the fourth and final planned frontend phase - customer,
 agent/counter, operator_admin, and platform_admin all now have working
 UIs end to end.
+
+**Search-result filters & categorisation (2026-08-30):** the customer
+`/search` and agent `/agent/search` results pages - previously a flat,
+departure-sorted list with a server-paged `SearchPager` - now filter, sort,
+categorise and re-paginate **entirely client-side**. Both pages are now
+~5-line wrappers around a shared `components/TripSearchView.jsx`
+(`tripLinkBase` + `editSearchTo` + `scoped` props are the only difference).
+It fetches the **whole lane in one request** via `useLaneTripSearch`
+(cross-operator, customer) or `useFleetLaneTripSearch` (`scoped`,
+tenant-scoped `/api/fleet/trips/search`, agent - see the operator-search
+note above; both hooks are always called with an `enabled` toggle so hook
+order stays stable and exactly one request fires), each `useTripSearch` /
+`useFleetTripSearch` pinned to `page=0, size=200`; the backend changes are
+`TripController.paginatedTripSearch`'s size clamp ceiling `100 -> 300` (the
+full result set is already assembled in memory server-side regardless, so
+returning 200 rows instead of 20 costs nothing - the N+1 `availableSeats`
+count per trip is unchanged and still the real scaling limit) and widening
+`operatorSearch` to `AGENT`. Pure
+filter/sort helpers live in `lib/tripFilters.js` (no React):
+time-of-day buckets (`timeBucket` - fixed EAT = UTC+3, no DST),
+`SORTS` (departure/price/duration/seats, all tie-breaking on departure),
+`deriveFacets` (price extent, operators-with-counts, per-bucket counts,
+sold-out count - all off the *unfiltered* lane so the controls don't
+flicker), `filterTrips`. `components/TripFilterPanel.jsx` is the controlled
+sidebar. **Order (2026-08-30):** Sort select · **Hide sold-out** · Departs
+checkboxes · Price min/max · Operator checkboxes. Hide-sold-out sits second
+(right under Sort, no section header) because it's the single most-used
+toggle and shouldn't be buried; **Operator is always last** - it's the only
+variable-length section (0 rows for a one-operator agent, up to ~14 on the
+marketplace, hidden entirely when ≤1), so nothing below it shifts.
+`emptyFilters().hideSoldOut` **defaults to `true`** (a sold-out `TripCard`
+has a dead "Select seats" that dead-ends on a full seat map - hidden unless
+the searcher opts back in, like flight/event sites); `activeFilterCount`
+deliberately does **not** count it (it's a default, not a narrowing, so it
+never drives the "Filters (n)" badge or "Clear all"). It's also surfaced a
+second time as a checkbox next to the category tabs in `TripSearchView`
+(same `filters.hideSoldOut` state, shown only when `facets.soldOutCount >
+0`). When the visible list is empty *only* because sold-out trips are
+hidden, the empty state swaps to "Every matching trip is sold out" + a
+**Show sold-out trips** button (`emptyOnlyDueToSoldOut` guard) instead of
+the useless "Clear filters" (which would re-hide them). On desktop the
+sidebar `<aside>` is `md:sticky md:top-4` with its **own**
+scroll area (`md:max-h-[calc(100vh-2rem)] md:overflow-y-auto
+md:overscroll-contain`, `scrollbar-gutter:stable`) so a long operator list
+scrolls within the panel instead of dragging the whole page and pushing the
+results column around; on mobile it's an inline collapse behind a
+"Filters (n)" toggle. Above the results a 3-way segmented control
+(All / Cheapest / Fastest,
+`PeriodSelector`'s class recipe) that just pins the sort and stays in sync
+with the Sort select. When the sort is "departure" (the "All" category) the
+list is grouped under Morning/Afternoon/Evening subheaders; any other sort
+is a flat list. Filters are component-local `useState`, **not** URL-synced
+(a shareable filtered link is a deliberate follow-up), and reset on a new
+origin/destination/date the same way `page` already did. `SearchPager` was
+already purely presentational and drives the client-side page slice
+unchanged. `TripCard` gained a ` · 6h 30m` duration next to the arrival
+time (from `lib/format.js`'s new `formatDuration`) so the Fastest sort is
+legible. No `SecurityConfig` / `node-bff` change (`/api/fleet/trips/search`
+was already behind `requireSession` + Bearer-forwarded; `size` forwarded on
+both). Verified live in a real browser on `/search` and `/agent/search`
+(Addis Ababa <-> Bahir Dar / Hawassa): category tabs, every filter, the
+filtered-count pager, the "no trips match your filters" empty state, and
+the agent flow's `/agent/trips/:id` links all working; the agent search
+returns **only the signed-in agent's own operator** (Sky Bus agent sees
+Sky Bus trips, not the marketplace); `npm run build` and `mvn compile`
+clean, `TripSearchIntegrationTest` updated for the widened role.
+
+**Edit-search state + quick-date buttons (2026-08-30, same session):** two
+usability fixes to the results page. (1) **"Edit search" was destructive** -
+it linked to the bare `/` (customer) / `/agent`, whose forms init from
+`useState('')`, so the caller lost everything they'd typed. Now the link
+carries the current query (`{ pathname: editSearchTo, search:
+searchParams.toString() }`), and `Home.jsx` / `agent/Search.jsx` seed their
+form state from `useSearchParams()` (the date field converts `departureAfter`
+back to a `YYYY-MM-DD` local value via `toDateInputValue`). Round-trips
+cleanly - `/search?...` -> Edit -> `/?...` pre-filled -> change one field ->
+`/search?...`. (2) **No date navigation** on the results page - the empty
+state literally said "try a different date" with no control. Added a
+Today / Tomorrow / `<weekday>` (day-after) button row in `TripSearchView`,
+above the category tabs, always visible (incl. the empty state). Each sets
+`departureAfter` to that day's local-midnight ISO (same shape the form
+builds) via `setSearchParams`, which re-runs the lane fetch; the button
+matching the active day is highlighted (absent `departureAfter` = "Today").
+New `lib/format.js` helpers: `toDateInputValue`, `startOfLocalDayIso`,
+`formatDayLabel`. Verified live on both `/search` (guest) and
+`/agent/search` (Sky Bus agent).
 
 **Two more real bugs found live 2026-08-24, using the customer flow as an
 actual user rather than through curl:**

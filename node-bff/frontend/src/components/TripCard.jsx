@@ -1,10 +1,13 @@
 import { Link } from 'react-router-dom';
-import { formatDateTime, formatCurrency } from '../lib/format.js';
+import { formatDateTime, formatCurrency, formatDuration } from '../lib/format.js';
+import { tripDurationMs } from '../lib/tripFilters.js';
+import { seatFillClass } from '../lib/seats.js';
 
 function seatsBadge(availableSeats) {
-  if (availableSeats <= 0) return { text: 'Sold out', className: 'bg-danger-light text-danger' };
-  if (availableSeats <= 4) return { text: `${availableSeats} seats left`, className: 'bg-warning-light text-warning' };
-  return { text: `${availableSeats} seats left`, className: 'bg-success-light text-success' };
+  return {
+    text: availableSeats <= 0 ? 'Sold out' : `${availableSeats} seats left`,
+    className: seatFillClass(availableSeats),
+  };
 }
 
 export default function TripCard({ trip, to }) {
@@ -31,7 +34,9 @@ export default function TripCard({ trip, to }) {
       </div>
       <p className="mt-1 text-sm text-ink-muted">
         Departs {formatDateTime(trip.departureAt)}
-        {trip.arrivalAt && <> · Arrives {formatDateTime(trip.arrivalAt)}</>}
+        {trip.arrivalAt && (
+          <> · Arrives {formatDateTime(trip.arrivalAt)} · {formatDuration(tripDurationMs(trip))}</>
+        )}
       </p>
       <div className="mt-4 flex items-center justify-between">
         <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}>

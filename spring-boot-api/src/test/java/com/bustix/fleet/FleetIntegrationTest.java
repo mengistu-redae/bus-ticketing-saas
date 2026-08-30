@@ -2,6 +2,8 @@ package com.bustix.fleet;
 
 import com.bustix.operator.Operator;
 import com.bustix.scheduling.CreateTripRequest;
+import com.bustix.scheduling.Seat;
+import com.bustix.scheduling.Trip;
 import com.bustix.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -15,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -96,6 +99,118 @@ class FleetIntegrationTest extends AbstractIntegrationTest {
         UUID tripId = UUID.fromString(objectMapper.readTree(tripJson).get("id").asText());
         // "2x2" over capacity 8 -> two full rows: 1A,1B,1C,1D,2A,2B,2C,2D.
         assertThat(seatRepository.findAllByTripId(tripId)).hasSize(8);
+    }
+
+    // --- GET /api/fleet/trips/manage - the operator "Trips" page list:
+    // denormalized, filtered (upcoming|all|cancelled), route-filterable, paged.
+
+    @Test
+    void manageListUpcomingBucketExcludesCancelledPastAndOtherOperatorsTrips() throws Exception {
+        Operator operatorA = createOperator("manage-a-" + UUID.randomUUID(), "Manage A");
+        Operator operatorB = createOperator("manage-b-" + UUID.randomUUID(), "Manage B");
+        var busA = createBus(operatorA.getId(), "MA-1", 40, "2x2");
+        var routeA = createRoute(operatorA.getId(), "Addis Ababa", "Gondar");
+
+        createTrip(operatorA.getId(), routeA.getId(), busA.getId(),
+                Instant.now().plus(2, ChronoUnit.DAYS), new BigDecimal("300.00"));   // upcoming
+        Trip past = createTrip(operatorA.getId(), routeA.getId(), busA.getId(),
+                Instant.now().minus(2, ChronoUnit.DAYS), new BigDecimal("300.00"));  // departed
+        Trip cancelled = createTrip(operatorA.getId(), routeA.getId(), busA.getId(),
+                Instant.now().plus(3, ChronoUnit.DAYS), new BigDecimal("300.00"));
+        cancelled.setStatus("cancelled");
+        tripRepository.save(cancelled);
+
+        var busB = createBus(operatorB.getId(), "MB-1", 40, "2x2");
+        var routeB = createRoute(operatorB.getId(), "Addis Ababa", "Gondar");
+        createTrip(operatorB.getId(), routeB.getId(), busB.getId(),
+                Instant.now().plus(2, ChronoUnit.DAYS), new BigDecimal("280.00"));
+
+        mockMvc.perform(get("/api/fleet/trips/manage")
+                        .with(asOperatorAdmin("admin-a", operatorA.getKeycloakOrgId())))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Total-Count", "1"))
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].origin").value("Addis Ababa"))
+                .andExpect(jsonPath("$[0].destination").value("Gondar"))
+                .andExpect(jsonPath("$[0].busPlateNo").value("MA-1"))
+                .andExpect(jsonPath("$[0].busCapacity").value(40))
+                .andExpect(jsonPath("$[0].status").value("scheduled"));
+
+        assertThat(past.getId()).isNotNull();
+    }
+
+    @Test
+    void manageListCancelledBucketAndRouteFilter() throws Exception {
+        Operator operator = createOperator("manage-c-" + UUID.randomUUID(), "Manage C");
+        var bus = createBus(operator.getId(), "MC-1", 20, "2x2");
+        var route1 = createRoute(operator.getId(), "Adama", "Hawassa");
+        var route2 = createRoute(operator.getId(), "Adama", "Jimma");
+        createTrip(operator.getId(), route1.getId(), bus.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("150.00"));
+        Trip c = createTrip(operator.getId(), route2.getId(), bus.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("200.00"));
+        c.setStatus("cancelled");
+        tripRepository.save(c);
+
+        mockMvc.perform(get("/api/fleet/trips/manage").param("status", "cancelled")
+                        .with(asOperatorAdmin("admin-c", operator.getKeycloakOrgId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].destination").value("Jimma"));
+
+        mockMvc.perform(get("/api/fleet/trips/manage")
+                        .param("status", "all").param("routeId", route1.getId().toString())
+                        .with(asOperatorAdmin("admin-c", operator.getKeycloakOrgId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].destination").value("Hawassa"));
+    }
+
+    @Test
+    void manageListReportsSeatOccupancy() throws Exception {
+        Operator operator = createOperator("manage-occ-" + UUID.randomUUID(), "Manage Occ");
+        var bus = createBus(operator.getId(), "MO-1", 4, "2x2");
+        var route = createRoute(operator.getId(), "Bahir Dar", "Gondar");
+        Trip trip = createTrip(operator.getId(), route.getId(), bus.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("100.00"));
+        createSeat(trip.getId(), "1A");
+        createSeat(trip.getId(), "1B");
+        createSeat(trip.getId(), "1C");
+        Seat booked = createSeat(trip.getId(), "1D");
+        booked.setStatus("booked");
+        seatRepository.save(booked);
+
+        mockMvc.perform(get("/api/fleet/trips/manage")
+                        .with(asOperatorAdmin("admin-occ", operator.getKeycloakOrgId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].busCapacity").value(4))
+                .andExpect(jsonPath("$[0].availableSeats").value(3))
+                .andExpect(jsonPath("$[0].bookedSeats").value(1));
+    }
+
+    @Test
+    void manageListIsOperatorAdminOnly() throws Exception {
+        Operator operator = createOperator("manage-role-" + UUID.randomUUID(), "Manage Role");
+        mockMvc.perform(get("/api/fleet/trips/manage")
+                        .with(asAgent("agent-1", operator.getKeycloakOrgId())))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void creatingATripWithArrivalBeforeDepartureIsRejected() throws Exception {
+        Operator operator = createOperator("bad-trip-" + UUID.randomUUID(), "Bad Trip Co");
+        var bus = createBus(operator.getId(), "BT-1", 8, "2x2");
+        var route = createRoute(operator.getId(), "Dessie", "Kombolcha");
+        Instant depart = Instant.now().plus(1, ChronoUnit.DAYS);
+
+        CreateTripRequest request = new CreateTripRequest(
+                route.getId(), bus.getId(), depart, depart.minus(1, ChronoUnit.HOURS), new BigDecimal("90.00"));
+
+        mockMvc.perform(post("/api/fleet/trips")
+                        .with(asOperatorAdmin("admin-1", operator.getKeycloakOrgId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

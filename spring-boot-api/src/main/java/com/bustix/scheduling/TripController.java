@@ -88,14 +88,21 @@ public class TripController {
      * paginated query; that's a bigger change than this pass, so this is a
      * defensive cap, not a scalability fix - the X-Total-Count response
      * header tells a caller how much was actually cut off.
+     *
+     * The customer/agent results page filters, sorts and re-paginates the
+     * whole lane client-side (see node-bff/frontend TripSearchView), so it
+     * asks for one large page; the size ceiling below is 300 to accommodate
+     * that without a second round-trip.
      */
     // Public - a guest browsing/booking a trip with no account needs this
     // before any login exists at all (see V8__guest_bookings.sql /
     // BookingController.createGuestBooking). Matched by a permitAll() in
     // SecurityConfig ahead of the blanket /api/** authenticated() rule.
-    // Cross-operator by design: a customer / guest / agent compares trips
-    // across every operator on the platform. An operator searching its OWN
-    // inventory uses GET /api/fleet/trips/search below instead.
+    // Cross-operator by design: a customer / guest compares trips across
+    // every operator on the platform. Operator staff (OPERATOR_ADMIN /
+    // AGENT) searching their OWN inventory use GET /api/fleet/trips/search
+    // below instead - a counter agent can only sell their own operator's
+    // trips, so a cross-operator list would be a dead end for them.
     @GetMapping("/api/trips/search")
     public ResponseEntity<List<TripSearchResult>> search(
             @RequestParam String origin,
@@ -117,11 +124,19 @@ public class TripController {
     /**
      * The operator-scoped mirror of {@link #search}: same origin/destination
      * match and response shape, but only the calling operator's own routes -
-     * an operator never sees another operator's trips. OPERATOR_ADMIN only
-     * (agents keep using the cross-operator marketplace search above).
+     * an operator never sees another operator's trips.
+     *
+     * OPERATOR_ADMIN and AGENT (widened from admin-only 2026-08-30): an
+     * agent books at the counter only on their own operator's inventory
+     * ({@code BookingService} throws {@link com.bustix.booking.TenantMismatchException}
+     * / 403 otherwise), so their search must be tenant-scoped too - showing
+     * a counter agent trips they can't sell is a dead end. Same precedent as
+     * {@code GET /api/fleet/trips} and {@code /api/fleet/routes}, both
+     * already {@code hasAnyRole('OPERATOR_ADMIN', 'AGENT')}. Customers and
+     * guests still use the cross-operator marketplace search above.
      */
     @GetMapping("/api/fleet/trips/search")
-    @PreAuthorize("hasRole('OPERATOR_ADMIN')")
+    @PreAuthorize("hasAnyRole('OPERATOR_ADMIN', 'AGENT')")
     public ResponseEntity<List<TripSearchResult>> operatorSearch(
             @RequestParam String origin,
             @RequestParam String destination,
@@ -168,7 +183,7 @@ public class TripController {
         results.sort(Comparator.comparing(TripSearchResult::departureAt));
 
         int pageNumber = Math.max(page, 0);
-        int pageSize = Math.min(Math.max(size, 1), 100);
+        int pageSize = Math.min(Math.max(size, 1), 300);
         List<TripSearchResult> pageOfResults = results.stream()
                 .skip((long) pageNumber * pageSize)
                 .limit(pageSize)
@@ -290,6 +305,78 @@ public class TripController {
     @PreAuthorize("hasAnyRole('OPERATOR_ADMIN', 'AGENT')")
     public List<Trip> list() {
         return tripRepository.findAllByTenantId(TenantContext.require());
+    }
+
+    /**
+     * The operator "Trips" management list - denormalized (route origin/
+     * destination, bus plate/capacity, live seat occupancy) and
+     * filtered/paged, unlike {@link #list()} above which returns every bare
+     * {@link Trip} row for the cargo trip-picker. {@code status} buckets:
+     * {@code upcoming} (default - scheduled and not yet departed, the
+     * actionable set), {@code cancelled}, {@code all}. Optional
+     * {@code routeId} filter. Same in-memory filter-then-slice +
+     * X-Total-Count shape as {@link #paginatedTripSearch}.
+     */
+    @GetMapping("/api/fleet/trips/manage")
+    @PreAuthorize("hasRole('OPERATOR_ADMIN')")
+    public ResponseEntity<List<OperatorTripView>> manageList(
+            @RequestParam(defaultValue = "upcoming") String status,
+            @RequestParam(required = false) UUID routeId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        UUID tenantId = TenantContext.require();
+        Instant now = Instant.now();
+
+        List<Trip> trips = switch (status) {
+            case "cancelled" -> tripRepository.findAllByTenantIdAndStatus(tenantId, "cancelled");
+            case "all" -> tripRepository.findAllByTenantId(tenantId);
+            default -> tripRepository.findAllByTenantIdAndStatus(tenantId, "scheduled").stream()
+                    .filter(t -> t.getDepartureAt().isAfter(now))
+                    .toList();
+        };
+
+        // upcoming: soonest first; all / cancelled: newest first (history view).
+        boolean ascending = !"all".equals(status) && !"cancelled".equals(status);
+        Comparator<Trip> byDeparture = Comparator.comparing(Trip::getDepartureAt);
+
+        List<OperatorTripView> results = trips.stream()
+                .filter(t -> routeId == null || routeId.equals(t.getRouteId()))
+                .sorted(ascending ? byDeparture : byDeparture.reversed())
+                .map(this::toOperatorTripView)
+                .toList();
+
+        int pageNumber = Math.max(page, 0);
+        int pageSize = Math.min(Math.max(size, 1), 100);
+        List<OperatorTripView> pageOfResults = results.stream()
+                .skip((long) pageNumber * pageSize)
+                .limit(pageSize)
+                .toList();
+
+        return ResponseEntity.ok()
+                .header("X-Total-Count", String.valueOf(results.size()))
+                .body(pageOfResults);
+    }
+
+    private OperatorTripView toOperatorTripView(Trip trip) {
+        Route route = routeRepository.findById(trip.getRouteId()).orElse(null);
+        Bus bus = busRepository.findById(trip.getBusId()).orElse(null);
+        int capacity = bus != null ? bus.getCapacity() : 0;
+        long availableSeats = seatRepository.countByTripIdAndStatus(trip.getId(), "open");
+        return new OperatorTripView(
+                trip.getId(),
+                trip.getRouteId(),
+                trip.getBusId(),
+                route != null ? route.getOrigin() : "Unknown",
+                route != null ? route.getDestination() : "Unknown",
+                bus != null ? bus.getPlateNo() : null,
+                capacity,
+                trip.getDepartureAt(),
+                trip.getArrivalAt(),
+                trip.getPrice(),
+                trip.getStatus(),
+                availableSeats,
+                Math.max(0, capacity - availableSeats));
     }
 
     @GetMapping("/api/fleet/trips/{tripId}")
