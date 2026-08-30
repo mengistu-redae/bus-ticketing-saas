@@ -41,7 +41,10 @@ export default function AgentSeatSelection() {
     () => (seats || []).filter((s) => selectedSeatIds.includes(s.id)),
     [seats, selectedSeatIds],
   );
-  const total = trip ? Number(trip.price) * selectedSeatIds.length : 0;
+  const subtotal = trip ? Number(trip.price) * selectedSeatIds.length : 0;
+  const vatRate = trip?.vatRate != null ? Number(trip.vatRate) : 0;
+  const tax = Math.round(subtotal * vatRate * 100) / 100;
+  const total = subtotal + tax;
   const missingPassengerName = selectedSeatIds.some((id) => !passengers[id]?.passengerName?.trim());
 
   function toggleSeat(seat) {
@@ -132,6 +135,11 @@ export default function AgentSeatSelection() {
                       .join(', ')}`}
               </p>
               <p className="font-mono text-xl font-semibold tabular-nums text-ink">{formatCurrency(total)}</p>
+              {selectedSeatIds.length > 0 && tax > 0 && (
+                <p className="text-xs text-ink-muted">
+                  {formatCurrency(subtotal)} + {formatCurrency(tax)} VAT
+                </p>
+              )}
             </div>
             <button
               type="button"

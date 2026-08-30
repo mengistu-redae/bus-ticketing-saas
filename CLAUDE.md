@@ -227,10 +227,21 @@ still holds.
 
 `BookingService`: select seat(s) -> acquire a short-lived Redis lock per seat
 (`SeatLockService`, TTL `bustix.seat-lock.ttl-seconds`) -> lock acquired
-(write the booking) or already locked (409 `SeatConflictException`). The lock
-only proves *this request* currently holds the seat in Redis;
-`BookingWriter`'s DB write re-checks `seats.status = 'open'` inside the
-transaction, so a seat sold through some other path can't be double-sold.
+(write the booking) or already locked (409 `SeatConflictException`). The
+Redis lock is only the **fast path** - it gives a quick 409 across app
+instances without hitting the DB. The **correctness backstop** is in
+`BookingWriter`: `SeatRepository.findByIdAndTripId` is
+`@Lock(PESSIMISTIC_WRITE)` (`SELECT ... FOR UPDATE`), so the
+`seats.status = 'open'` re-check inside the transaction is airtight even
+if the Redis lock is bypassed (its TTL expiring mid-write, a Redis
+failover, a caller with locks disabled) - `booking_seats`'s
+`(booking_id, seat_id)` PK does **not** stop the same seat landing in two
+bookings, so without the row lock a double-sell was possible. Both write
+paths that flip a seat to `booked` (`BookingWriter`,
+`BookingRescheduleService`) go through that locked finder; the read-only
+seat map (`findAllByTripId`) does not. `SeatDoubleBookingIntegrationTest`
+proves the DB alone refuses the second booking with the Redis lock mocked
+out.
 
 The DB write lives in `BookingWriter`, a **separate bean** from
 `BookingService`, so its `@Transactional` goes through Spring's proxy
@@ -256,6 +267,17 @@ Every request resolves its Keycloak subject to an internal `app_user.id` via
 login (Keycloak stays the source of truth for identity; `app_user` is a local
 mirror joined against `bookings.customer_user_id`,
 `cancellations.cancelled_by`, notification recipient lookups, etc.).
+
+**Seat-selection frontend (2026-08-30 pass):** `useTripSeats` polls every
+15s (`refetchInterval`) so a seat taken by someone else shows as taken
+before the user hits the 409 at "Book now" - previously a static snapshot
+from page load; `useCreateBooking` also now invalidates
+`['trips', tripId, 'seats']`. The seat-page summary shows the
+**tax-inclusive** total (`720.00 + 108.00 VAT` under the big number),
+matching what `POST /api/bookings` will actually charge - `TripSearchResult`
+gained `vatRate` (from the operator's effective settings) for this;
+previously the seat page showed the pre-VAT subtotal and the confirmation
+page a different, larger number.
 
 **No staff-facing lookup of bookings existed until 2026-08-24** -
 `BookingRepository.findAllByTenantId`/`findByIdAndTenantId` had been there

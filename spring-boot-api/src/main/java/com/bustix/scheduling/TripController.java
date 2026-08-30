@@ -235,6 +235,7 @@ public class TripController {
                 trip.getPrice(),
                 availableSeats,
                 busPlateNo,
+                settings.vatRate(),
                 settings.supportPhone(),
                 settings.supportEmail(),
                 settings.websiteUrl(),

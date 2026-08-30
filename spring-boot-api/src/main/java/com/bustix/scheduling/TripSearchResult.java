@@ -31,6 +31,8 @@ public record TripSearchResult(
     long availableSeats,
     /** The bus's plate number, shown on a passenger ticket. */
     String busPlateNo,
+    /** The operator's effective VAT rate (e.g. 0.15) - lets the seat-selection page show the tax-inclusive total the customer will actually be charged. */
+    BigDecimal vatRate,
     /** Operator contact / ticket-footer info from operator_settings - null when the operator hasn't provided it. */
     String operatorSupportPhone,
     String operatorSupportEmail,

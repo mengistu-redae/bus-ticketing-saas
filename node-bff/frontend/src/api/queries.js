@@ -102,6 +102,10 @@ export function useTripSeats(tripId) {
     queryKey: ['trips', tripId, 'seats'],
     queryFn: () => apiGet(`/api/trips/${tripId}/seats`),
     enabled: Boolean(tripId),
+    // The seat map goes stale as other people book; poll while the seat-
+    // selection page is open so a taken seat shows as taken before the
+    // user hits the 409 at "Book now".
+    refetchInterval: 15000,
   });
 }
 
@@ -121,9 +125,10 @@ export function useCreateBooking() {
   return useMutation({
     mutationFn: ({ tripId, passengers, idempotencyKey }) =>
       apiPost('/api/bookings', { tripId, passengers, idempotencyKey }),
-    onSuccess: () => {
+    onSuccess: (_data, { tripId }) => {
       queryClient.invalidateQueries({ queryKey: ['my-bookings'] });
       queryClient.invalidateQueries({ queryKey: ['agent-bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['trips', tripId, 'seats'] });
     },
   });
 }
