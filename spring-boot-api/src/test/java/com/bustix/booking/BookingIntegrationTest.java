@@ -17,6 +17,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -71,6 +72,34 @@ class BookingIntegrationTest extends AbstractIntegrationTest {
         assertThat(seatRepository.findById(seat.getId()).orElseThrow().getStatus()).isEqualTo("booked");
         assertThat(notificationRepository.findTop50ByStatusOrderByCreatedAtAsc("pending"))
                 .anySatisfy(n -> assertThat(n.getBookingId()).isEqualTo(bookingId));
+    }
+
+    @Test
+    void bookingUsesTheOperatorsOverriddenVatRateWhenOneIsConfigured() throws Exception {
+        Operator operator = createOperator("booking-vat-" + UUID.randomUUID(), "VAT Co");
+        var bus = createBus(operator.getId(), "BK-VAT", 10, "2x2");
+        var route = createRoute(operator.getId(), "Addis Ababa", "Adama");
+        Trip trip = createTrip(operator.getId(), route.getId(), bus.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("120.00"));
+        Seat seat = createSeat(trip.getId(), "1A");
+
+        // Override VAT to 10% for this operator only (default is 15%).
+        mockMvc.perform(patch("/api/fleet/settings")
+                        .with(asOperatorAdmin("admin-vat", operator.getKeycloakOrgId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"vatRate\":0.10}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/bookings")
+                        .with(asCustomer("customer-1"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new CreateBookingRequest(trip.getId(), passengers(seat.getId()), "idem-vat"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.subtotalAmount").value(120.00))
+                // 120.00 x 10% = 12.00, not the platform-default 18.00.
+                .andExpect(jsonPath("$.taxAmount").value(12.00))
+                .andExpect(jsonPath("$.totalAmount").value(132.00));
     }
 
     @Test

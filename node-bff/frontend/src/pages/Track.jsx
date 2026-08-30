@@ -100,6 +100,13 @@ export default function Track() {
               <dd className="text-ink">{formatDateTime(trackQuery.data.collectedAt)}</dd>
             </div>
           </dl>
+
+          {(trackQuery.data.operatorSupportPhone || trackQuery.data.operatorSupportEmail) && (
+            <p className="mt-4 border-t border-slate-100 pt-4 text-xs text-ink-muted">
+              Operator support:{' '}
+              {[trackQuery.data.operatorSupportPhone, trackQuery.data.operatorSupportEmail].filter(Boolean).join(' · ')}
+            </p>
+          )}
         </div>
       )}
     </div>

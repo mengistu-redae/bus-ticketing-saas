@@ -25,6 +25,7 @@ import OperatorBuses from './pages/operator/Buses.jsx';
 import OperatorRoutes from './pages/operator/Routes.jsx';
 import OperatorTrips from './pages/operator/Trips.jsx';
 import OperatorRefundPolicies from './pages/operator/RefundPolicies.jsx';
+import OperatorSettings from './pages/operator/Settings.jsx';
 import PlatformOperators from './pages/platform/Operators.jsx';
 import Waybills from './pages/cargo/Waybills.jsx';
 import WaybillDetail from './pages/cargo/WaybillDetail.jsx';
@@ -251,6 +252,14 @@ export default function App() {
           element={
             <RequireRole role="operator_admin">
               <OperatorRefundPolicies />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/operator/settings"
+          element={
+            <RequireRole role="operator_admin">
+              <OperatorSettings />
             </RequireRole>
           }
         />

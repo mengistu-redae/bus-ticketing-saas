@@ -69,6 +69,9 @@ export default function AppShell() {
                   <NavLink to="/operator/cargo-rates" className={navLinkClass}>
                     Cargo Rates
                   </NavLink>
+                  <NavLink to="/operator/settings" className={navLinkClass}>
+                    Settings
+                  </NavLink>
                 </>
               )}
               {/* Cargo waybill management is usable by AGENT and

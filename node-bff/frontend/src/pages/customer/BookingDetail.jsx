@@ -169,6 +169,18 @@ export default function BookingDetail() {
             Refunded {formatCurrency(refundAmount)}
           </div>
         )}
+
+        {trip && (trip.operatorSupportPhone || trip.operatorSupportEmail || trip.operatorTicketFooterNote) && (
+          <div className="mt-4 border-t border-slate-100 pt-4 text-xs text-ink-muted">
+            {(trip.operatorSupportPhone || trip.operatorSupportEmail) && (
+              <p>
+                {trip.operatorName} support:{' '}
+                {[trip.operatorSupportPhone, trip.operatorSupportEmail].filter(Boolean).join(' · ')}
+              </p>
+            )}
+            {trip.operatorTicketFooterNote && <p className="mt-1">{trip.operatorTicketFooterNote}</p>}
+          </div>
+        )}
       </div>
 
       {!authenticated && (

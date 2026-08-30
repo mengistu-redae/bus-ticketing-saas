@@ -47,10 +47,17 @@ bustix:
   seat-lock:
     ttl-seconds: 300
   ticketing:
+    # NOTE: every value under bustix.ticketing.* here is the *platform-wide
+    # default*. As of the "Per-operator settings" feature an operator_admin
+    # can override each one for their own operator via
+    # PATCH /api/fleet/settings (operator_settings table); OperatorSettingsService
+    # .resolve merges the override over the default, so consumers
+    # (BookingWriter, BookingRescheduleService, TripController,
+    # TripUpdateService) read the resolved value, not these keys directly.
+    # These stay the fallback for any operator that hasn't customized them.
+    #
     # Applied to a booking's subtotal (seat count x trip price) to get
-    # tax_amount - see BookingWriter. Ethiopia's standard VAT rate; make
-    # this operator-configurable if/when a non-Ethiopian operator ever
-    # onboards, not needed for v1.
+    # tax_amount - see BookingWriter. Ethiopia's standard VAT rate.
     vat-rate: 0.15
     # A ticket's "reporting time" (when a passenger should be at the
     # terminal) is derived, not stored - departure_at minus this buffer.

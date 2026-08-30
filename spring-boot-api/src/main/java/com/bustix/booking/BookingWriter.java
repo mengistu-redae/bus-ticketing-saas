@@ -5,10 +5,10 @@ import com.bustix.notification.Notification;
 import com.bustix.notification.NotificationRepository;
 import com.bustix.operator.Operator;
 import com.bustix.operator.OperatorRepository;
+import com.bustix.operator.OperatorSettingsService;
 import com.bustix.scheduling.Seat;
 import com.bustix.scheduling.SeatRepository;
 import com.bustix.scheduling.Trip;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,8 +30,8 @@ public class BookingWriter {
     private final BookingInfantRepository bookingInfantRepository;
     private final NotificationRepository notificationRepository;
     private final OperatorRepository operatorRepository;
+    private final OperatorSettingsService operatorSettingsService;
     private final TicketNumberGenerator ticketNumberGenerator;
-    private final BigDecimal vatRate;
 
     public BookingWriter(
             SeatRepository seatRepository,
@@ -40,16 +40,16 @@ public class BookingWriter {
             BookingInfantRepository bookingInfantRepository,
             NotificationRepository notificationRepository,
             OperatorRepository operatorRepository,
-            TicketNumberGenerator ticketNumberGenerator,
-            @Value("${bustix.ticketing.vat-rate}") BigDecimal vatRate) {
+            OperatorSettingsService operatorSettingsService,
+            TicketNumberGenerator ticketNumberGenerator) {
         this.seatRepository = seatRepository;
         this.bookingRepository = bookingRepository;
         this.bookingSeatRepository = bookingSeatRepository;
         this.bookingInfantRepository = bookingInfantRepository;
         this.notificationRepository = notificationRepository;
         this.operatorRepository = operatorRepository;
+        this.operatorSettingsService = operatorSettingsService;
         this.ticketNumberGenerator = ticketNumberGenerator;
-        this.vatRate = vatRate;
     }
 
     @Transactional
@@ -79,6 +79,7 @@ public class BookingWriter {
             seats.add(seat);
         }
 
+        BigDecimal vatRate = operatorSettingsService.resolve(trip.getTenantId()).vatRate();
         BigDecimal subtotalAmount = trip.getPrice().multiply(BigDecimal.valueOf(seats.size()));
         BigDecimal taxAmount = subtotalAmount.multiply(vatRate).setScale(2, RoundingMode.HALF_UP);
         BigDecimal totalAmount = subtotalAmount.add(taxAmount);

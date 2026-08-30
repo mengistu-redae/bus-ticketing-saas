@@ -2,8 +2,10 @@ package com.bustix.booking;
 
 import com.bustix.fleet.Route;
 import com.bustix.fleet.RouteRepository;
+import com.bustix.operator.EffectiveOperatorSettings;
 import com.bustix.operator.Operator;
 import com.bustix.operator.OperatorRepository;
+import com.bustix.operator.OperatorSettingsService;
 import com.bustix.scheduling.Seat;
 import com.bustix.scheduling.SeatRepository;
 import com.bustix.scheduling.Trip;
@@ -36,6 +38,7 @@ public class BookingService {
     private final BookingSeatRepository bookingSeatRepository;
     private final BookingWriter bookingWriter;
     private final OperatorRepository operatorRepository;
+    private final OperatorSettingsService operatorSettingsService;
 
     public BookingService(
             SeatLockService seatLockService,
@@ -45,7 +48,8 @@ public class BookingService {
             BookingRepository bookingRepository,
             BookingSeatRepository bookingSeatRepository,
             BookingWriter bookingWriter,
-            OperatorRepository operatorRepository) {
+            OperatorRepository operatorRepository,
+            OperatorSettingsService operatorSettingsService) {
         this.seatLockService = seatLockService;
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
@@ -54,6 +58,7 @@ public class BookingService {
         this.bookingSeatRepository = bookingSeatRepository;
         this.bookingWriter = bookingWriter;
         this.operatorRepository = operatorRepository;
+        this.operatorSettingsService = operatorSettingsService;
     }
 
     /**
@@ -161,6 +166,8 @@ public class BookingService {
                 })
                 .toList();
 
+        EffectiveOperatorSettings settings = operatorSettingsService.resolve(booking.getTenantId());
+
         return new BookingTrackingView(
                 booking.getBookingRef(),
                 booking.getTicketNumber(),
@@ -173,6 +180,8 @@ public class BookingService {
                 booking.getSubtotalAmount(),
                 booking.getTaxAmount(),
                 booking.getTotalAmount(),
-                seatViews);
+                seatViews,
+                settings.supportPhone(),
+                settings.supportEmail());
     }
 }

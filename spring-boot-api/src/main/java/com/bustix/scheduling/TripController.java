@@ -4,11 +4,12 @@ import com.bustix.fleet.Bus;
 import com.bustix.fleet.BusRepository;
 import com.bustix.fleet.Route;
 import com.bustix.fleet.RouteRepository;
+import com.bustix.operator.EffectiveOperatorSettings;
 import com.bustix.operator.Operator;
 import com.bustix.operator.OperatorRepository;
+import com.bustix.operator.OperatorSettingsService;
 import com.bustix.tenant.TenantContext;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -27,7 +28,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -52,7 +55,8 @@ public class TripController {
     private final OperatorRepository operatorRepository;
     private final BusRepository busRepository;
     private final TripCreationService tripCreationService;
-    private final long reportingBufferMinutes;
+    private final TripUpdateService tripUpdateService;
+    private final OperatorSettingsService operatorSettingsService;
 
     public TripController(
             RouteRepository routeRepository,
@@ -61,14 +65,16 @@ public class TripController {
             OperatorRepository operatorRepository,
             BusRepository busRepository,
             TripCreationService tripCreationService,
-            @Value("${bustix.ticketing.reporting-buffer-minutes}") long reportingBufferMinutes) {
+            TripUpdateService tripUpdateService,
+            OperatorSettingsService operatorSettingsService) {
         this.routeRepository = routeRepository;
         this.tripRepository = tripRepository;
         this.seatRepository = seatRepository;
         this.operatorRepository = operatorRepository;
         this.busRepository = busRepository;
         this.tripCreationService = tripCreationService;
-        this.reportingBufferMinutes = reportingBufferMinutes;
+        this.tripUpdateService = tripUpdateService;
+        this.operatorSettingsService = operatorSettingsService;
     }
 
     /**
@@ -106,13 +112,19 @@ public class TripController {
         List<Route> routes = routeRepository.findAllByOriginIgnoreCaseAndDestinationIgnoreCase(
                 origin.trim(), destination.trim());
         List<TripSearchResult> results = new ArrayList<>();
+        // Request-local memo so a large cross-tenant result set isn't one
+        // operator_settings lookup per trip - operators repeat heavily
+        // across a route's trips.
+        Map<UUID, EffectiveOperatorSettings> settingsByOperator = new HashMap<>();
 
         for (Route route : routes) {
             for (Trip trip : tripRepository.findAllByRouteIdAndDepartureAtAfter(route.getId(), after)) {
                 if (!"scheduled".equals(trip.getStatus())) {
                     continue;
                 }
-                results.add(toTripSearchResult(trip, route));
+                EffectiveOperatorSettings settings = settingsByOperator.computeIfAbsent(
+                        trip.getTenantId(), operatorSettingsService::resolve);
+                results.add(toTripSearchResult(trip, route, settings));
             }
         }
 
@@ -195,11 +207,11 @@ public class TripController {
                 .orElseThrow(() -> new NoSuchElementException("Trip not found: " + tripId));
         Route route = routeRepository.findById(trip.getRouteId())
                 .orElseThrow(() -> new NoSuchElementException("Route not found: " + trip.getRouteId()));
-        return toTripSearchResult(trip, route);
+        return toTripSearchResult(trip, route, operatorSettingsService.resolve(trip.getTenantId()));
     }
 
     /** Shared by search() and getTripDetails() above - same composed response, different entry points. */
-    private TripSearchResult toTripSearchResult(Trip trip, Route route) {
+    private TripSearchResult toTripSearchResult(Trip trip, Route route, EffectiveOperatorSettings settings) {
         long availableSeats = seatRepository.countByTripIdAndStatus(trip.getId(), "open");
         Operator operator = operatorRepository.findById(trip.getTenantId()).orElse(null);
         String operatorName = operator != null ? operator.getName() : "Unknown";
@@ -217,10 +229,14 @@ public class TripController {
                 route.getDestinationTerminal(),
                 trip.getDepartureAt(),
                 trip.getArrivalAt(),
-                trip.getDepartureAt().minus(Duration.ofMinutes(reportingBufferMinutes)),
+                trip.getDepartureAt().minus(Duration.ofMinutes(settings.reportingBufferMinutes())),
                 trip.getPrice(),
                 availableSeats,
-                busPlateNo);
+                busPlateNo,
+                settings.supportPhone(),
+                settings.supportEmail(),
+                settings.websiteUrl(),
+                settings.ticketFooterNote());
     }
 
     // --- Below: staff-scoped fleet management, not the marketplace search above. ---
@@ -249,21 +265,17 @@ public class TripController {
         return tripCreationService.createTrip(request, TenantContext.require());
     }
 
+    /**
+     * Delegates to {@link TripUpdateService} (its own {@code @Transactional}
+     * bean) so a departure/arrival-time change and the resulting
+     * {@code trip_rescheduled} notification cascade to every booked customer
+     * commit together - see that service and CLAUDE.md's "Per-operator
+     * settings" section. A price-only edit notifies nobody.
+     */
     @PatchMapping("/api/fleet/trips/{tripId}")
     @PreAuthorize("hasRole('OPERATOR_ADMIN')")
     public Trip update(@PathVariable UUID tripId, @Valid @RequestBody UpdateTripRequest request) {
-        Trip trip = findOwnedTrip(tripId);
-
-        if (request.departureAt() != null) {
-            trip.setDepartureAt(request.departureAt());
-        }
-        if (request.arrivalAt() != null) {
-            trip.setArrivalAt(request.arrivalAt());
-        }
-        if (request.price() != null) {
-            trip.setPrice(request.price());
-        }
-        return tripRepository.save(trip);
+        return tripUpdateService.update(tripId, TenantContext.require(), request);
     }
 
     /**

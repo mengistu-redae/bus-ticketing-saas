@@ -2,13 +2,14 @@ package com.bustix.booking;
 
 import com.bustix.notification.Notification;
 import com.bustix.notification.NotificationRepository;
+import com.bustix.operator.EffectiveOperatorSettings;
+import com.bustix.operator.OperatorSettingsService;
 import com.bustix.refund.BookingAlreadyCancelledException;
 import com.bustix.scheduling.Seat;
 import com.bustix.scheduling.SeatRepository;
 import com.bustix.scheduling.Trip;
 import com.bustix.scheduling.TripRepository;
 import com.bustix.user.AppUserRepository;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,10 +48,7 @@ public class BookingRescheduleService {
     private final SeatLockService seatLockService;
     private final NotificationRepository notificationRepository;
     private final AppUserRepository appUserRepository;
-    private final BigDecimal vatRate;
-    private final long minNoticeHours;
-    private final BigDecimal feeSelfService;
-    private final BigDecimal feeCounter;
+    private final OperatorSettingsService operatorSettingsService;
 
     public BookingRescheduleService(
             BookingRepository bookingRepository,
@@ -62,10 +60,7 @@ public class BookingRescheduleService {
             SeatLockService seatLockService,
             NotificationRepository notificationRepository,
             AppUserRepository appUserRepository,
-            @Value("${bustix.ticketing.vat-rate}") BigDecimal vatRate,
-            @Value("${bustix.ticketing.reschedule.min-notice-hours}") long minNoticeHours,
-            @Value("${bustix.ticketing.reschedule.fee-self-service}") BigDecimal feeSelfService,
-            @Value("${bustix.ticketing.reschedule.fee-counter}") BigDecimal feeCounter) {
+            OperatorSettingsService operatorSettingsService) {
         this.bookingRepository = bookingRepository;
         this.bookingSeatRepository = bookingSeatRepository;
         this.bookingInfantRepository = bookingInfantRepository;
@@ -75,10 +70,7 @@ public class BookingRescheduleService {
         this.seatLockService = seatLockService;
         this.notificationRepository = notificationRepository;
         this.appUserRepository = appUserRepository;
-        this.vatRate = vatRate;
-        this.minNoticeHours = minNoticeHours;
-        this.feeSelfService = feeSelfService;
-        this.feeCounter = feeCounter;
+        this.operatorSettingsService = operatorSettingsService;
     }
 
     /** Staff path - tenant-scoped, same shape as CancellationService.cancel. */
@@ -101,6 +93,14 @@ public class BookingRescheduleService {
         if ("cancelled".equals(booking.getStatus())) {
             throw new BookingAlreadyCancelledException("Booking already cancelled: " + booking.getId());
         }
+
+        // Effective settings for this booking's operator - the reschedule
+        // time gate, mutation fees and VAT rate are all operator-overridable
+        // (falling back to the application.yml defaults), and the
+        // "booking_rescheduled" notice below is gated on the operator's
+        // reschedule-notifications toggle.
+        EffectiveOperatorSettings settings = operatorSettingsService.resolve(booking.getTenantId());
+        long minNoticeHours = settings.rescheduleMinNoticeHours();
 
         List<BookingSeat> existingSeats = bookingSeatRepository.findAllByIdBookingId(booking.getId());
         if (existingSeats.size() != 1) {
@@ -150,9 +150,11 @@ public class BookingRescheduleService {
             newSeat.setStatus("booked");
             seatRepository.save(newSeat);
 
-            BigDecimal fee = "counter".equals(booking.getChannel()) ? feeCounter : feeSelfService;
+            BigDecimal fee = "counter".equals(booking.getChannel())
+                    ? settings.rescheduleFeeCounter()
+                    : settings.rescheduleFeeSelfService();
             BigDecimal newSubtotal = newTrip.getPrice();
-            BigDecimal newTax = newSubtotal.multiply(vatRate).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal newTax = newSubtotal.multiply(settings.vatRate()).setScale(2, RoundingMode.HALF_UP);
             BigDecimal newTotal = newSubtotal.add(newTax).add(fee);
 
             // Move the booking_seats row: BookingSeat.Id embeds seatId, so
@@ -222,8 +224,10 @@ public class BookingRescheduleService {
             // CancellationService's identical guard for why this skips the
             // lookup entirely rather than crashing (appUserRepository.
             // findById(null) throws, and a guest has no email on file
-            // anyway).
-            if (savedBooking.getCustomerUserId() != null) {
+            // anyway). Gated on the operator's reschedule-notifications
+            // toggle (default on) - the same switch that governs the
+            // trip-time-change cascade in TripUpdateService.
+            if (settings.rescheduleNotificationsEnabled() && savedBooking.getCustomerUserId() != null) {
                 appUserRepository.findById(savedBooking.getCustomerUserId()).ifPresent(customer -> {
                     Notification notification = new Notification();
                     notification.setBookingId(savedBooking.getId());

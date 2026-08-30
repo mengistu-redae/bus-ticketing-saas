@@ -24,7 +24,10 @@ public record BookingTrackingView(
     BigDecimal subtotalAmount,
     BigDecimal taxAmount,
     BigDecimal totalAmount,
-    List<SeatView> seats
+    List<SeatView> seats,
+    /** Operator support contact from operator_settings - null when not provided. Not sensitive (it's the operator's public contact). */
+    String operatorSupportPhone,
+    String operatorSupportEmail
 ) {
     public record SeatView(String seatNo, String passengerName) {
     }

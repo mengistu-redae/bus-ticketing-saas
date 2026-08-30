@@ -198,6 +198,32 @@ class TenantIsolationIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isNotFound());
     }
 
+    // ---- Per-operator settings (singleton, tenant-scoped) ----
+
+    @Test
+    void oneOperatorsSettingsAreInvisibleToAndUnaffectedByAnother() throws Exception {
+        twoOperators();
+
+        // A overrides its VAT rate.
+        mockMvc.perform(patch("/api/fleet/settings").with(asOperatorAdmin("iso-a-admin", orgA()))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"vatRate\":0.07}"))
+                .andExpect(status().isOk());
+
+        // B still sees the platform default, not A's override.
+        mockMvc.perform(get("/api/fleet/settings").with(asOperatorAdmin("iso-b-admin", orgB())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.overrides").doesNotExist())
+                .andExpect(jsonPath("$.effective.vatRate").value(0.15));
+
+        // B changing its own settings doesn't touch A's.
+        mockMvc.perform(patch("/api/fleet/settings").with(asOperatorAdmin("iso-b-admin", orgB()))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"vatRate\":0.20}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/fleet/settings").with(asOperatorAdmin("iso-a-admin", orgA())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.effective.vatRate").value(0.07));
+    }
+
     // ---- Cargo waybill lifecycle ----
 
     @Test

@@ -4,8 +4,10 @@ import com.bustix.booking.Booking;
 import com.bustix.booking.BookingRepository;
 import com.bustix.fleet.Route;
 import com.bustix.fleet.RouteRepository;
+import com.bustix.operator.EffectiveOperatorSettings;
 import com.bustix.operator.Operator;
 import com.bustix.operator.OperatorRepository;
+import com.bustix.operator.OperatorSettingsService;
 import com.bustix.refund.RefundCalculator;
 import com.bustix.scheduling.Trip;
 import com.bustix.scheduling.TripRepository;
@@ -41,6 +43,7 @@ public class CargoWaybillService {
     private final WaybillNumberGenerator waybillNumberGenerator;
     private final ProhibitedItemsChecker prohibitedItemsChecker;
     private final RefundCalculator refundCalculator;
+    private final OperatorSettingsService operatorSettingsService;
 
     public CargoWaybillService(
             CargoWaybillRepository cargoWaybillRepository,
@@ -53,7 +56,8 @@ public class CargoWaybillService {
             OperatorRepository operatorRepository,
             WaybillNumberGenerator waybillNumberGenerator,
             ProhibitedItemsChecker prohibitedItemsChecker,
-            RefundCalculator refundCalculator) {
+            RefundCalculator refundCalculator,
+            OperatorSettingsService operatorSettingsService) {
         this.cargoWaybillRepository = cargoWaybillRepository;
         this.cargoWaybillItemRepository = cargoWaybillItemRepository;
         this.cancellationRepository = cancellationRepository;
@@ -65,6 +69,7 @@ public class CargoWaybillService {
         this.waybillNumberGenerator = waybillNumberGenerator;
         this.prohibitedItemsChecker = prohibitedItemsChecker;
         this.refundCalculator = refundCalculator;
+        this.operatorSettingsService = operatorSettingsService;
     }
 
     @Transactional
@@ -410,6 +415,11 @@ public class CargoWaybillService {
         Trip trip = tripRepository.findById(waybill.getTripId()).orElse(null);
         Route route = trip != null ? routeRepository.findById(trip.getRouteId()).orElse(null) : null;
 
+        // waybill.getTenantId() is null only for a still-'requested' waybill,
+        // which has no waybillNumber to look up here anyway - resolve()
+        // tolerates null and returns platform defaults (both contacts null).
+        EffectiveOperatorSettings settings = operatorSettingsService.resolve(waybill.getTenantId());
+
         return new WaybillTrackingView(
                 waybill.getWaybillNumber(),
                 waybill.getStatus(),
@@ -419,7 +429,9 @@ public class CargoWaybillService {
                 waybill.getCollectedAt(),
                 route != null ? route.getOrigin() : null,
                 route != null ? route.getDestination() : null,
-                trip != null ? trip.getDepartureAt() : null);
+                trip != null ? trip.getDepartureAt() : null,
+                settings.supportPhone(),
+                settings.supportEmail());
     }
 
     private CargoWaybill findOwnedWaybill(UUID waybillId, UUID tenantId) {

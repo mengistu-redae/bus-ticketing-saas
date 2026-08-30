@@ -19,6 +19,9 @@ public record WaybillTrackingView(
     Instant collectedAt,
     String origin,
     String destination,
-    Instant departureAt
+    Instant departureAt,
+    /** Operator support contact from operator_settings - null when not provided. The operator's own public contact, not sensitive. */
+    String operatorSupportPhone,
+    String operatorSupportEmail
 ) {
 }

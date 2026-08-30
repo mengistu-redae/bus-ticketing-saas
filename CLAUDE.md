@@ -292,8 +292,11 @@ printed ticket:
   number. Both generated columns are checked for uniqueness with a bounded
   retry (`bookingRepository.existsByTicketNumber`/`existsByBookingRef`)
   before being assigned, not trusted from randomness alone.
-- **VAT**: `bustix.ticketing.vat-rate` (`application.yml`, default `0.15`)
-  is applied to a booking's subtotal by `BookingWriter` to get `tax_amount`.
+- **VAT**: `bustix.ticketing.vat-rate` (`application.yml`, default `0.15`,
+  **per-operator-overridable since 2026-08-30 - see "Per-operator
+  settings"**; `BookingWriter` reads `OperatorSettingsService.resolve(...)
+  .vatRate()`, not the `@Value` directly) is applied to a booking's
+  subtotal by `BookingWriter` to get `tax_amount`.
   Existing pre-2026-08-24 bookings were backfilled with `tax_amount = 0`
   (not retroactively taxed) and a ticket/PNR derived from their existing
   `id` - see the migration's own comment for why that's a safe one-time
@@ -1019,6 +1022,83 @@ v1 prices per trip, flat, regardless of seat (`trips.price`,
 default) but unused for pricing - reserved for a future
 `seat_class -> multiplier` table, changing only how `BookingWriter` computes
 `total_amount`, no schema migration needed.
+
+## Per-operator settings
+
+Added 2026-08-30. Before this, every operator ran on the same
+platform-wide business config baked into `application.yml`
+(`bustix.ticketing.*`). `operator_settings` (`V12`, one row per operator,
+`tenant_id` PK - a **singleton**, not a collection) lets an
+`operator_admin` override each of those values for their own operator,
+carry operator contact / ticket-footer info, and govern the reschedule
+notification behaviour.
+
+- **`GET` / `PATCH /api/fleet/settings`** (`OPERATOR_ADMIN`,
+  `OperatorSettingsController`, tenant-scoped via `TenantContext` like
+  `RefundPolicyController`). No id, no `POST`/`DELETE`. `GET` returns
+  `{overrides, effective, defaults}` (`OperatorSettingsResponse` - a
+  purpose-built read shape like `WaybillWithItems`): `overrides` is the raw
+  row (nullable fields, or `null` if no row yet), `effective` is
+  overrides-merged-over-defaults, `defaults` is the `application.yml`
+  values for the UI's "default: 0.15" hints.
+- **The row is lazy** - `GET` works with no row (returns pure defaults);
+  the row is created on the first `PATCH`. No backfill migration, no
+  coupling to `OperatorProvisioningService`.
+- **`PATCH` is a full replace of the override set**, not the app's usual
+  partial update: the settings screen is one form that always submits its
+  whole state, so a `null` field means "clear this override / revert to
+  the platform default". Each override column is nullable;
+  `reschedule_notifications_enabled` is `NOT NULL DEFAULT true`.
+- **`OperatorSettingsService.resolve(tenantId)`** is the single merge
+  point - it holds the `@Value` platform defaults (moved here out of
+  `BookingWriter` / `BookingRescheduleService` / `TripController`) and
+  coalesces each nullable override with its default. `resolve(null)` is
+  safe (a tracked-but-never-issued waybill has no tenant) and returns pure
+  defaults. Consumers now read `resolve(...)` instead of injecting the
+  `@Value`s: `BookingWriter` (VAT), `BookingRescheduleService` (VAT +
+  reschedule notice/fees + the notifications toggle), `TripController`
+  (reporting buffer - `search()` memoizes per operator so a big result set
+  isn't N lookups), `TripUpdateService` (the cascade below).
+- **Overridable**: `vat_rate`, `reporting_buffer_minutes`,
+  `reschedule_min_notice_hours`, `reschedule_fee_self_service`/
+  `_counter`. **Still platform-only** (deliberately - not per-operator):
+  `bustix.cargo.prohibited-items`, `bustix.seat-lock.ttl-seconds`,
+  `bustix.tenant.org-claim-path`.
+- **Contact / ticket info** (`support_phone` E.164-Ethiopian-validated,
+  `support_email`, `support_address`, `website_url`,
+  `ticket_footer_note`) surfaces on `TripSearchResult` (all five - feeds
+  the customer/agent `BookingDetail` "ticket" views via the trip query)
+  and, narrowed to phone+email, on `BookingTrackingView` /
+  `WaybillTrackingView` (the public track pages). Nulls when the operator
+  hasn't set them.
+- **Trip-time-change notification cascade** (`TripUpdateService`, a new
+  `@Transactional` bean `TripController.update` delegates to, same
+  split-bean reason as `BookingWriter`): when `PATCH /api/fleet/trips/{id}`
+  actually changes `departureAt` or `arrivalAt`, every `status='confirmed'`
+  booking on the trip gets a `trip_rescheduled` outbox notification -
+  **gated on `reschedule_notifications_enabled`** (default on), the same
+  toggle that governs the per-booking `booking_rescheduled` notice in
+  `BookingRescheduleService`. Guests (`customerUserId == null`) are
+  skipped, same guard as every other notification write. A price-only edit
+  and the `DELETE` (cancel) path notify nobody - the broader "trip
+  lifecycle transitions" work is still separate.
+
+Verified live end-to-end against the running dev stack (`V12` applied,
+Hibernate `validate` passed on boot): `GET` returns defaults with
+`overrides:null`; `PATCH` (vat 0.10, notice 24h, phone, footer, toggle
+off) persists and `effective` reflects it while un-set fields stay
+default; invalid `vatRate`/`supportPhone` → 400; agent → 403; a booking
+under the 0.10 override taxed at 10% not 15%; the trip contact fields
+appear in `/api/trips/search` and `/api/trips/{id}`; a departure-time
+`PATCH` queued **no** `trip_rescheduled` row with the toggle off and
+exactly one (for the booked customer) with it on; a price-only edit
+queued none. Test row + notifications deleted afterward; `operator_settings`
+left empty. `OperatorSettingsIntegrationTest` /
+`TripRescheduleNotificationIntegrationTest` plus new cases on
+`BookingIntegrationTest` (VAT override) and `TenantIsolationIntegrationTest`
+(one operator's settings invisible to / unaffected by another) cover it -
+compile clean, same Testcontainers-unrun-on-this-machine caveat as the
+rest of the suite.
 
 ## Refund & cancellation
 

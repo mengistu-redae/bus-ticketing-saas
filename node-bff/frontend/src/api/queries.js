@@ -400,6 +400,23 @@ export function useDeleteRefundPolicy() {
   });
 }
 
+// ---- operator settings (operator_admin, singleton per operator) ----
+// GET /api/fleet/settings returns { overrides, effective, defaults } - see
+// OperatorSettingsController. PATCH is a full replace of the override set:
+// a null field clears that override back to the platform default.
+
+export function useOperatorSettings() {
+  return useQuery({ queryKey: ['fleet', 'settings'], queryFn: () => apiGet('/api/fleet/settings') });
+}
+
+export function useUpdateOperatorSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPatch('/api/fleet/settings', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fleet', 'settings'] }),
+  });
+}
+
 // ---- cargo waybills (agent/operator_admin, tenant-scoped) ----
 // /api/cargo/waybills(/{id})(/dispatch|arrive|collect|cancel) - staff-only,
 // see com.bustix.cargo.CargoWaybillController. Every read/mutation here

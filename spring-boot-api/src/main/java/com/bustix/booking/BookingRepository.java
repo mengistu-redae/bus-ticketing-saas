@@ -14,6 +14,12 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
     List<Booking> findAllByTenantId(UUID tenantId);
 
+    // Backs the trip-time-change notification cascade (TripUpdateService):
+    // every still-active booking on a trip whose departure/arrival was just
+    // edited. Not tenant-scoped in the signature because the caller already
+    // resolved the trip tenant-scoped and passes its own tripId.
+    List<Booking> findAllByTripIdAndStatus(UUID tripId, String status);
+
     Optional<Booking> findByIdAndTenantId(UUID id, UUID tenantId);
 
     Optional<Booking> findByTenantIdAndIdempotencyKey(UUID tenantId, String idempotencyKey);

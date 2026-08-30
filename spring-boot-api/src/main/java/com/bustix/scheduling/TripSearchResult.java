@@ -28,6 +28,11 @@ public record TripSearchResult(
     BigDecimal price,
     long availableSeats,
     /** The bus's plate number, shown on a passenger ticket. */
-    String busPlateNo
+    String busPlateNo,
+    /** Operator contact / ticket-footer info from operator_settings - null when the operator hasn't provided it. */
+    String operatorSupportPhone,
+    String operatorSupportEmail,
+    String operatorWebsiteUrl,
+    String operatorTicketFooterNote
 ) {
 }
