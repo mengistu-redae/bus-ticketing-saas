@@ -4,9 +4,19 @@ export default function PublicShell() {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-surface">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <span className="text-lg font-bold text-brand">Bustix</span>
-          <div className="flex items-center gap-4">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+            {/* "/" is the marketplace search for a logged-out visitor -
+                without this, /track and /track-booking are dead ends (no way
+                back to search but the browser back button). */}
+            <Link to="/" className="text-lg font-bold text-brand">
+              Bustix
+            </Link>
+            <Link to="/" className="text-sm font-medium text-ink-muted hover:text-ink">
+              Search trips
+            </Link>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
             {/* /track works with no login at all (see Track.jsx /
                 node-bff's public-tracking carve-out) - a real router Link,
                 unlike the login button below, since it stays inside the

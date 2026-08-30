@@ -17,12 +17,15 @@ export default function AppShell() {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-surface">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-8">
+        {/* flex-wrap so the nav links wrap and the user block drops below
+            rather than clipping on narrow viewports - no hamburger yet, this
+            is the interim overflow guard. */}
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:gap-x-8">
             <NavLink to="/" className="text-lg font-bold text-brand">
               Bustix
             </NavLink>
-            <nav className="flex items-center gap-1">
+            <nav className="flex flex-wrap items-center gap-1">
               {hasRole('customer') && (
                 <>
                   <NavLink to="/" end className={navLinkClass}>
