@@ -32,7 +32,12 @@ public interface RouteRepository extends JpaRepository<Route, UUID> {
     // spirit as the in-memory search pagination elsewhere), but a
     // functional index on LOWER(origin), LOWER(destination) would be the
     // real fix if this table ever gets large enough for it to matter.
-    List<Route> findAllByOriginIgnoreCaseAndDestinationIgnoreCase(String origin, String destination);
+    //
+    // ActiveTrue - a soft-deactivated route (DELETE /api/fleet/routes/{id})
+    // must not keep surfacing its trips in the marketplace (and staying
+    // bookable). Matches the active=true filter the locations() autocomplete
+    // already applies.
+    List<Route> findAllByOriginIgnoreCaseAndDestinationIgnoreCaseAndActiveTrue(String origin, String destination);
 
     // Backs the From/To autocomplete (GET /api/trips/locations) - a city
     // typed so far is matched as a substring against every active route's

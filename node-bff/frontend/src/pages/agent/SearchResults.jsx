@@ -1,9 +1,13 @@
+import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useTripSearch } from '../../api/queries.js';
 import TripCard from '../../components/TripCard.jsx';
 import { TripCardSkeleton } from '../../components/Skeleton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
 import ErrorBanner from '../../components/ErrorBanner.jsx';
+import SearchPager from '../../components/SearchPager.jsx';
+
+const PAGE_SIZE = 20;
 
 /**
  * The agent/counter mirror of the customer SearchResults page - same
@@ -17,7 +21,15 @@ export default function AgentSearchResults() {
   const destination = searchParams.get('destination') || '';
   const departureAfter = searchParams.get('departureAfter') || undefined;
 
-  const { data, isLoading, isError, error, refetch } = useTripSearch({ origin, destination, departureAfter }, true);
+  const [page, setPage] = useState(0);
+  useEffect(() => setPage(0), [origin, destination, departureAfter]);
+
+  const { data, isLoading, isError, error, refetch } = useTripSearch(
+    { origin, destination, departureAfter, page, size: PAGE_SIZE },
+    true,
+  );
+  const trips = data?.data ?? [];
+  const total = data?.totalCount ?? 0;
 
   return (
     <div>
@@ -40,7 +52,7 @@ export default function AgentSearchResults() {
 
       {isError && <ErrorBanner message={error?.message} onRetry={refetch} />}
 
-      {!isLoading && !isError && data?.data.length === 0 && (
+      {!isLoading && !isError && total === 0 && (
         <EmptyState
           title="No trips found"
           description="Try a different date, or double-check the origin and destination."
@@ -52,12 +64,15 @@ export default function AgentSearchResults() {
         />
       )}
 
-      {!isLoading && !isError && data?.data.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {data.data.map((trip) => (
-            <TripCard key={trip.tripId} trip={trip} to={`/agent/trips/${trip.tripId}`} />
-          ))}
-        </div>
+      {!isLoading && !isError && total > 0 && (
+        <>
+          <div className="flex flex-col gap-3">
+            {trips.map((trip) => (
+              <TripCard key={trip.tripId} trip={trip} to={`/agent/trips/${trip.tripId}`} />
+            ))}
+          </div>
+          <SearchPager page={page} pageSize={PAGE_SIZE} shown={trips.length} total={total} onPageChange={setPage} />
+        </>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDelete, apiGet, apiGetWithCount, apiPatch, apiPost } from './client.js';
 
 // ---- auth ----
@@ -69,6 +69,8 @@ export function useTripSearch({ origin, destination, departureAfter, page = 0, s
     queryKey: ['trips', 'search', origin, destination, departureAfter, page, size],
     queryFn: () => apiGetWithCount(`/api/trips/search?${params.toString()}`),
     enabled: Boolean(enabled && origin && destination),
+    // Keep the current page visible (with its pager) while the next page loads.
+    placeholderData: keepPreviousData,
   });
 }
 

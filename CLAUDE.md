@@ -150,8 +150,12 @@ plus the deactivation lockout and the cargo-request routing below.
 
 **Marketplace exception** - customers browse/book across every operator, so
 these read paths are intentionally cross-tenant (no tenant filter):
-`RouteRepository.findAllByOriginAndDestination` (backed by
-`idx_routes_search`) and `TripRepository.findAllByRouteIdAndDepartureAtAfter`.
+`RouteRepository.findAllByOriginIgnoreCaseAndDestinationIgnoreCaseAndActiveTrue`
+(the `IgnoreCase` defeats `idx_routes_search`; `AndActiveTrue` stops a
+soft-deactivated route from still selling - added 2026-08-30, matching the
+`locations()` autocomplete) and `TripRepository.findAllByRouteIdAndDepartureAtAfter`
+(served by `idx_trips_route_departure`, `V14`, since `trips.route_id` was
+unindexed).
 Staff-facing endpoints for managing one operator's own routes/buses/trips use
 the tenant-scoped finders instead. Both are wired up:
 `GET /api/trips/search?origin=...&destination=...&departureAfter=...`
@@ -174,10 +178,11 @@ column for this (`V2__fleet_active_flag.sql`) - `PATCH {"active": true}`
 reactivates. Trips reuse the `status` column that already existed instead
 (`DELETE` sets it to `"cancelled"`; no new migration needed there).
 Deliberately **no cascading effect** on either: deactivating a route/trip
-doesn't touch its existing bookings (no auto-refund, no notification, and
-the marketplace search doesn't yet exclude inactive routes) - that's the
-same bigger "trip lifecycle transitions" feature called out below, not
-solved by this pass. Creating a trip also generates its `seats` rows from
+doesn't touch its existing bookings (no auto-refund, no notification) -
+that's the same bigger "trip lifecycle transitions" feature called out
+below, not solved by this pass. (Marketplace search **does** now exclude
+inactive *routes* as of 2026-08-30 - see the `AndActiveTrue` finder above;
+a deactivated *operator*'s trips still appear, deliberately.) Creating a trip also generates its `seats` rows from
 the bus's `capacity`/`seat_layout` - see `SeatLayoutGenerator` for the "AxB"
 layout parsing (`"2x2"` = 4 seats/row: `1A,1B,1C,1D,2A,...`) and its
 plain-number fallback for anything that doesn't parse. `GET
@@ -190,9 +195,13 @@ Postgres directly for one).
 capped at 100, added 2026-08-23) - previously returned every matching trip
 unbounded. The cap is applied **in-memory** after the full cross-tenant
 result set is assembled and sorted, not pushed down into the route-then-trip
-loop's DB queries; the response carries an `X-Total-Count` header so a
-caller can tell how much was cut off. A real fix would restructure that loop
-into one paginated query - bigger change, not done here.
+loop's DB queries; the response carries an `X-Total-Count` header. The
+frontend uses it as of 2026-08-30 (`SearchPager` on both `SearchResults`
+pages: "Showing 21-27 of 27" + Prev/Next, `useTripSearch` gained
+`keepPreviousData` for a flash-free page change) - previously the header
+was fetched (`apiGetWithCount`) but never shown, so a busy route's results
+were silently capped at 20. A real fix would still restructure that loop
+into one DB-paginated query - bigger change, not done here.
 
 `bustix.tenant.org-claim-path` in `application.yml` names the token claim
 `TenantContextFilter` reads for the org id. **Confirmed against a real

@@ -106,11 +106,12 @@ public class TripController {
 
         Instant after = departureAfter != null ? departureAfter : Instant.now();
 
-        // Trimmed and case-insensitive - see the IgnoreCase query's own
-        // comment on RouteRepository for why: found live, a customer typing
-        // any casing other than exactly how the operator entered the route
-        // got zero results with no indication why.
-        List<Route> routes = routeRepository.findAllByOriginIgnoreCaseAndDestinationIgnoreCase(
+        // Trimmed and case-insensitive, active routes only - see the query's
+        // own comment on RouteRepository for why: found live, a customer
+        // typing any casing other than exactly how the operator entered the
+        // route got zero results with no indication why; and a
+        // soft-deactivated route must stop selling.
+        List<Route> routes = routeRepository.findAllByOriginIgnoreCaseAndDestinationIgnoreCaseAndActiveTrue(
                 origin.trim(), destination.trim());
         List<TripSearchResult> results = new ArrayList<>();
         // Request-local memo so a large cross-tenant result set isn't one

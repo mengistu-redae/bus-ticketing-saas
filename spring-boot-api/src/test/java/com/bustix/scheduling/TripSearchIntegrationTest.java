@@ -77,6 +77,26 @@ class TripSearchIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void excludesTripsOnASoftDeactivatedRoute() throws Exception {
+        Operator operator = createOperator("operator-inactive-route-" + UUID.randomUUID(), "Inactive Route Co");
+        var bus = createBus(operator.getId(), "IRC-555", 40, "2x2");
+        var route = createRoute(operator.getId(), "Shashemene", "Dilla");
+        createTrip(operator.getId(), route.getId(), bus.getId(),
+                Instant.now().plus(1, ChronoUnit.DAYS), new BigDecimal("120.00"));
+
+        // DELETE /api/fleet/routes/{id} soft-deactivates.
+        route.setActive(false);
+        routeRepository.save(route);
+
+        mockMvc.perform(get("/api/trips/search")
+                        .param("origin", "Shashemene")
+                        .param("destination", "Dilla")
+                        .with(asCustomer("customer-3")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
     void agentCanAlsoSearchForCounterBookingOnBehalfOfAWalkInCustomer() throws Exception {
         Operator operator = createOperator("operator-agent-" + UUID.randomUUID(), "Agent Co");
         var bus = createBus(operator.getId(), "QQQ-444", 40, "2x2");
