@@ -11,6 +11,12 @@ import { formatCurrency, formatDateTime } from '../../lib/format.js';
 const inputClass =
   'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
 
+// Same as inputClass minus `w-full` - for controls that want to stay narrow.
+// Tailwind emits `.w-full` after the numbered width utilities, so appending
+// `w-44` to a class string that already has `w-full` does nothing.
+const narrowInputClass =
+  'rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
+
 const emptyItem = { description: '', quantity: '1', declaredValue: '', grossWeightKg: '' };
 
 const emptyForm = {
@@ -48,7 +54,14 @@ export default function Waybills() {
   const routeById = Object.fromEntries((routes || []).map((r) => [r.id, r]));
   const tripById = Object.fromEntries((trips || []).map((t) => [t.id, t]));
   const scheduledTrips = (trips || []).filter((t) => t.status === 'scheduled');
+  const noScheduledTrips = trips != null && scheduledTrips.length === 0;
+  // Oldest first - this is a review queue, so the longest-waiting request
+  // should be at the top.
+  const sortedRequests = [...(pendingRequests || [])].sort(
+    (a, b) => new Date(a.waybill.createdAt) - new Date(b.waybill.createdAt),
+  );
 
+  const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState(null);
 
@@ -61,7 +74,7 @@ export default function Waybills() {
   async function handleCreate(event) {
     event.preventDefault();
     setFormError(null);
-    const itemsValid = form.items.length > 0 && form.items.every((i) => i.description && i.grossWeightKg);
+    const itemsValid = form.items.length > 0 && form.items.every((i) => i.description && Number(i.grossWeightKg) > 0);
     if (!form.tripId || !form.consignorName || !form.consignorPhone || !form.consigneeName || !form.consigneePhone || !form.consigneeIdNumber || !itemsValid) {
       setFormError('Trip, both parties\' name/phone, consignee ID, and every item\'s description/gross weight are all required.');
       return;
@@ -93,7 +106,12 @@ export default function Waybills() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-ink">Cargo Waybills</h1>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={`${inputClass} w-44`}>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Filter waybills by status"
+          className={`${narrowInputClass} w-48`}
+        >
           <option value="">All statuses</option>
           <option value="issued">Issued</option>
           <option value="dispatched">Dispatched</option>
@@ -103,13 +121,13 @@ export default function Waybills() {
         </select>
       </div>
 
-      {pendingRequests?.length > 0 && (
+      {sortedRequests.length > 0 && (
         <div className="mb-6 rounded-xl border border-warning/40 bg-warning-light p-4">
           <h2 className="mb-3 text-sm font-semibold text-ink">
-            Pending customer requests ({pendingRequests.length})
+            Pending customer requests ({sortedRequests.length})
           </h2>
           <div className="flex flex-col gap-2">
-            {pendingRequests.map(({ waybill: wb, items }) => (
+            {sortedRequests.map(({ waybill: wb, items }) => (
               <Link
                 key={wb.id}
                 to={`/cargo/waybills/${wb.id}`}
@@ -131,7 +149,18 @@ export default function Waybills() {
         </div>
       )}
 
-      <form onSubmit={handleCreate} className="mb-6 rounded-xl border border-slate-200 bg-surface p-4">
+      <div className="mb-6">
+        <button
+          type="button"
+          onClick={() => setShowCreate((v) => !v)}
+          className="rounded-lg border border-brand/40 px-3 py-1.5 text-sm font-medium text-brand hover:bg-brand-light/40"
+        >
+          {showCreate ? 'Close' : '+ New waybill'}
+        </button>
+      </div>
+
+      {showCreate && (<>
+      <form onSubmit={handleCreate} className="mb-4 rounded-xl border border-slate-200 bg-surface p-4">
         <Field label="Trip">
           <select value={form.tripId} onChange={(e) => setForm({ ...form, tripId: e.target.value })} className={`${inputClass} max-w-md`}>
             <option value="">Select a trip</option>
@@ -140,6 +169,13 @@ export default function Waybills() {
             ))}
           </select>
         </Field>
+        {noScheduledTrips && (
+          <p className="mt-1 text-xs text-ink-muted">
+            No scheduled trips yet -{' '}
+            <Link to="/operator/trips" className="text-brand hover:underline">create one</Link>{' '}
+            before issuing a waybill.
+          </p>
+        )}
 
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <fieldset className="rounded-lg border border-slate-200 p-3">
@@ -172,17 +208,18 @@ export default function Waybills() {
         </div>
 
         <div className="mt-4">
-          <button type="submit" disabled={createWaybill.isPending} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-50">
+          <button type="submit" disabled={createWaybill.isPending || noScheduledTrips} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50">
             {createWaybill.isPending ? 'Creating…' : 'Create waybill'}
           </button>
         </div>
       </form>
       {formError && <div className="mb-4"><ErrorBanner message={formError} /></div>}
+      </>)}
 
       {isLoading && <Skeleton className="h-32 w-full" />}
       {isError && <ErrorBanner message={error?.message} onRetry={refetch} />}
       {!isLoading && !isError && waybills?.length === 0 && (
-        <EmptyState title="No waybills yet" description="Create your first waybill above - you'll need at least one scheduled trip and a cargo rate configured for its route." />
+        <EmptyState title="No waybills yet" description="Use “+ New waybill” above to create one - you'll need at least one scheduled trip and a cargo rate configured for its route." />
       )}
 
       {!isLoading && !isError && waybills?.length > 0 && (

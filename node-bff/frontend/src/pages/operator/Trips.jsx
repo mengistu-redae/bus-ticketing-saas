@@ -24,7 +24,10 @@ const STATUS_TABS = [
 ];
 
 const inputClass =
-  'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
+  // No `w-full`: every field sets its own width (w-56/w-40/…), and Tailwind
+  // emits `.w-full` after the numbered width utilities, so `w-full w-40`
+  // would render full-width and defeat the fixed size.
+  'rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
 
 /** <input type="datetime-local"> works in local time with no timezone/seconds - Trip times are Instants (UTC ISO). */
 function toDatetimeLocal(iso) {

@@ -1,5 +1,8 @@
+// No `w-full` here: every field below sets its own fixed width (w-56/w-20/…),
+// and Tailwind emits `.w-full` after the numbered width utilities, so a
+// `w-full w-28` combo would render full-width and defeat the fixed size.
 const inputClass =
-  'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
+  'rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
 
 /**
  * Add/remove-row editor for a shipment's line items (CargoWaybillItem on

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import {
   useArriveWaybill,
   useCancelWaybill,
@@ -54,6 +54,7 @@ export default function WaybillDetail() {
   const route = trip ? (routes || []).find((r) => r.id === trip.routeId) : null;
   const routeById = Object.fromEntries((routes || []).map((r) => [r.id, r]));
   const scheduledTrips = (trips || []).filter((t) => t.status === 'scheduled');
+  const noScheduledTrips = trips != null && scheduledTrips.length === 0;
 
   function tripLabel(t) {
     const r = routeById[t.routeId];
@@ -148,7 +149,7 @@ export default function WaybillDetail() {
   async function handleConfirmAndIssue(event) {
     event.preventDefault();
     setActionError(null);
-    const itemsValid = confirmForm.items.length > 0 && confirmForm.items.every((i) => i.description && i.grossWeightKg);
+    const itemsValid = confirmForm.items.length > 0 && confirmForm.items.every((i) => i.description && Number(i.grossWeightKg) > 0);
     if (!confirmForm.tripId) {
       setActionError('Pick a trip before issuing this waybill.');
       return;
@@ -239,10 +240,10 @@ export default function WaybillDetail() {
     }
   }
 
-  async function handlePaymentStatusChange(event) {
+  async function updatePaymentStatus(value) {
     setActionError(null);
     try {
-      await updateWaybill.mutateAsync({ paymentStatus: event.target.value });
+      await updateWaybill.mutateAsync({ paymentStatus: value });
     } catch (err) {
       setActionError(err.message || 'Could not update payment status.');
     }
@@ -423,11 +424,11 @@ export default function WaybillDetail() {
         )}
 
         {status !== 'requested' && (
-          <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-4 text-sm">
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 pt-4 text-sm">
             <span className="text-ink-muted">Payment</span>
             <select
               value={waybill.paymentStatus}
-              onChange={handlePaymentStatusChange}
+              onChange={(e) => updatePaymentStatus(e.target.value)}
               disabled={updateWaybill.isPending}
               className="rounded-lg border border-slate-300 px-2 py-1 text-sm capitalize focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
             >
@@ -435,6 +436,23 @@ export default function WaybillDetail() {
               <option value="paid">Paid</option>
               <option value="collect_on_delivery">Collect on delivery</option>
             </select>
+            {/* The paymentStatus string is a manual staff field, decoupled
+                from the payments ledger - flag when the two disagree. */}
+            {waybill.paymentStatus !== 'paid' && collected > 0.005 && balanceDue <= 0.005 && (
+              <button
+                type="button"
+                onClick={() => updatePaymentStatus('paid')}
+                disabled={updateWaybill.isPending}
+                className="text-xs text-brand hover:underline disabled:opacity-50"
+              >
+                Ledger is paid in full - mark Paid
+              </button>
+            )}
+            {waybill.paymentStatus === 'paid' && balanceDue > 0.005 && (
+              <span className="text-xs text-warning">
+                {formatCurrency(balanceDue)} still unpaid in the ledger
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -539,6 +557,13 @@ export default function WaybillDetail() {
               ))}
             </select>
           </Field>
+          {noScheduledTrips && (
+            <p className="mt-1 text-xs text-ink-muted">
+              No scheduled trips yet -{' '}
+              <Link to="/operator/trips" className="text-brand hover:underline">create one</Link>{' '}
+              before issuing this waybill.
+            </p>
+          )}
 
           <div className="mt-4 max-w-sm">
             <Field label="Consignee ID number">
@@ -559,8 +584,8 @@ export default function WaybillDetail() {
 
           <button
             type="submit"
-            disabled={confirmAndIssueWaybill.isPending}
-            className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:opacity-50"
+            disabled={confirmAndIssueWaybill.isPending || noScheduledTrips}
+            className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             {confirmAndIssueWaybill.isPending ? 'Issuing…' : 'Confirm and issue'}
           </button>

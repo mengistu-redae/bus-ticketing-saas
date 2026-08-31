@@ -6,7 +6,10 @@ import EmptyState from '../../components/EmptyState.jsx';
 import ErrorBanner from '../../components/ErrorBanner.jsx';
 
 const inputClass =
-  'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
+  // No `w-full`: every field sets its own width (w-36/w-48/…), and Tailwind
+  // emits `.w-full` after the numbered width utilities, so `w-full w-36`
+  // would render full-width and defeat the fixed size.
+  'rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
 
 const emptyForm = { origin: '', destination: '', distanceKm: '', originTerminal: '', destinationTerminal: '' };
 

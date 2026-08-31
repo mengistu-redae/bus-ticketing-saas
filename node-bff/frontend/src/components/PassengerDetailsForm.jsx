@@ -9,6 +9,12 @@ const ID_TYPES = [
 const inputClass =
   'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
 
+// Same as inputClass minus `w-full` - for the age/infant fields that want to
+// stay narrow. Tailwind emits `.w-full` after the numbered width utilities,
+// so `${inputClass} w-24` would otherwise still render full-width.
+const narrowInputClass =
+  'rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20';
+
 /**
  * One card per selected seat, collecting who it's actually for - a real
  * ticket is issued to a named passenger per seat, not an anonymous seat id
@@ -78,7 +84,7 @@ export default function PassengerDetailsForm({ seats, passengers, onChange, show
                   min="0"
                   value={passenger.age ?? ''}
                   onChange={(e) => onChange(seat.id, 'age', e.target.value)}
-                  className={`${inputClass} w-24`}
+                  className={`${narrowInputClass} w-24`}
                 />
               </Field>
               {showIdFields && (
@@ -115,7 +121,7 @@ export default function PassengerDetailsForm({ seats, passengers, onChange, show
                       value={infant.name}
                       onChange={(e) => updateInfant(i, 'name', e.target.value)}
                       placeholder="Riding on this passenger's lap"
-                      className={`${inputClass} w-56`}
+                      className={`${narrowInputClass} w-56`}
                     />
                   </Field>
                   <Field label="Age (0-2)">
@@ -125,7 +131,7 @@ export default function PassengerDetailsForm({ seats, passengers, onChange, show
                       max="2"
                       value={infant.age}
                       onChange={(e) => updateInfant(i, 'age', e.target.value)}
-                      className={`${inputClass} w-20`}
+                      className={`${narrowInputClass} w-20`}
                     />
                   </Field>
                   <button type="button" onClick={() => removeInfant(i)} className="mb-2 text-xs text-danger hover:underline">
