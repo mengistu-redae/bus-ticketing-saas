@@ -42,6 +42,9 @@ class WebhookIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private WebhookDispatcher dispatcher;
 
+    @Autowired
+    private com.bustix.cargo.CargoRateRepository cargoRateRepository;
+
     private static String[] webhookScopes() {
         return new String[] {"trips:read", "bookings:read", "bookings:write", "webhooks:manage"};
     }
@@ -101,6 +104,52 @@ class WebhookIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/v1/webhooks").with(asPartner("wh-scope", "trips:read")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("insufficient-scope"));
+    }
+
+    @Test
+    void aWaybillStatusChangeQueuesADelivery() throws Exception {
+        Operator operator = createOperator("wh-wb-" + UUID.randomUUID(), "WH WB Co");
+        createApiClient(operator.getId(), "wh-wb");
+        // A waybill for this operator, moved to "dispatched" through the internal staff path.
+        var bus = createBus(operator.getId(), "WHW-1", 4, "2x2");
+        var route = createRoute(operator.getId(), "Addis Ababa", "Adama");
+        Trip trip = createTrip(operator.getId(), route.getId(), bus.getId(),
+                Instant.now().plus(3, ChronoUnit.DAYS), new BigDecimal("120.00"));
+
+        // Seed a cargo rate so the waybill can be priced.
+        var rate = new com.bustix.cargo.CargoRate();
+        rate.setTenantId(operator.getId());
+        rate.setFreeWeightThresholdKg(new BigDecimal("30.00"));
+        rate.setBaseFreightCharge(new BigDecimal("200.00"));
+        rate.setSurchargePerKg(new BigDecimal("10.00"));
+        rate.setHandlingFee(new BigDecimal("50.00"));
+        cargoRateRepository.save(rate);
+
+        String wbBody = """
+                {"tripId":"%s","consignorName":"C","consignorPhone":"+251911111111",
+                 "consigneeName":"D","consigneePhone":"+251922222222","consigneeIdNumber":"ID-1",
+                 "items":[{"description":"Books","grossWeightKg":10.0}]}
+                """.formatted(trip.getId());
+        String wb = mockMvc.perform(post("/api/cargo/waybills")
+                        .with(asOperatorAdmin("wb-admin", operator.getKeycloakOrgId()))
+                        .contentType(MediaType.APPLICATION_JSON).content(wbBody))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        UUID waybillId = UUID.fromString(objectMapper.readTree(wb).get("waybill").get("id").asText());
+
+        String created = mockMvc.perform(post("/v1/webhooks").with(asPartner("wh-wb", webhookScopes()))
+                        .header("Idempotency-Key", "k-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"https://example.test/hook\",\"eventTypes\":\"waybill.status_changed\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        UUID endpointId = UUID.fromString(objectMapper.readTree(created).get("id").asText());
+
+        mockMvc.perform(post("/api/cargo/waybills/{id}/dispatch", waybillId)
+                        .with(asOperatorAdmin("wb-admin", operator.getKeycloakOrgId())))
+                .andExpect(status().isOk());
+
+        await().atMost(ofSeconds(3)).until(() -> deliveryRepository
+                .findTop50ByEndpointIdOrderByCreatedAtDesc(endpointId).stream()
+                .anyMatch(d -> d.getEventType().equals("waybill.status_changed")));
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.bustix.cargo;
 
+import com.bustix.api.v1.webhook.PartnerEvent;
+import com.bustix.api.v1.webhook.PartnerEvent.PartnerEventTypes;
 import com.bustix.booking.Booking;
 import com.bustix.booking.BookingRepository;
 import com.bustix.fleet.Route;
@@ -12,13 +14,16 @@ import com.bustix.operator.OperatorSettingsService;
 import com.bustix.refund.RefundCalculator;
 import com.bustix.scheduling.Trip;
 import com.bustix.scheduling.TripRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -45,6 +50,7 @@ public class CargoWaybillService {
     private final ProhibitedItemsChecker prohibitedItemsChecker;
     private final RefundCalculator refundCalculator;
     private final OperatorSettingsService operatorSettingsService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public CargoWaybillService(
             CargoWaybillRepository cargoWaybillRepository,
@@ -58,7 +64,8 @@ public class CargoWaybillService {
             WaybillNumberGenerator waybillNumberGenerator,
             ProhibitedItemsChecker prohibitedItemsChecker,
             RefundCalculator refundCalculator,
-            OperatorSettingsService operatorSettingsService) {
+            OperatorSettingsService operatorSettingsService,
+            ApplicationEventPublisher eventPublisher) {
         this.cargoWaybillRepository = cargoWaybillRepository;
         this.cargoWaybillItemRepository = cargoWaybillItemRepository;
         this.cancellationRepository = cancellationRepository;
@@ -71,6 +78,18 @@ public class CargoWaybillService {
         this.prohibitedItemsChecker = prohibitedItemsChecker;
         this.refundCalculator = refundCalculator;
         this.operatorSettingsService = operatorSettingsService;
+        this.eventPublisher = eventPublisher;
+    }
+
+    /** A {@code waybill.status_changed} partner webhook - fired on a real transition, not an idempotent re-call. */
+    private void publishStatusChanged(CargoWaybill waybill) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("waybillId", waybill.getId().toString());
+        data.put("waybillNumber", waybill.getWaybillNumber());
+        data.put("operatorId", waybill.getTenantId() != null ? waybill.getTenantId().toString() : null);
+        data.put("status", waybill.getStatus());
+        eventPublisher.publishEvent(new PartnerEvent(
+                PartnerEventTypes.WAYBILL_STATUS_CHANGED, waybill.getTenantId(), data));
     }
 
     @Transactional
@@ -211,7 +230,9 @@ public class CargoWaybillService {
         }
         waybill.setStatus("dispatched");
         waybill.setDispatchedAt(Instant.now());
-        return cargoWaybillRepository.save(waybill);
+        CargoWaybill saved = cargoWaybillRepository.save(waybill);
+        publishStatusChanged(saved);
+        return saved;
     }
 
     @Transactional
@@ -227,7 +248,9 @@ public class CargoWaybillService {
         }
         waybill.setStatus("arrived");
         waybill.setArrivedAt(Instant.now());
-        return cargoWaybillRepository.save(waybill);
+        CargoWaybill saved = cargoWaybillRepository.save(waybill);
+        publishStatusChanged(saved);
+        return saved;
     }
 
     @Transactional
@@ -251,7 +274,9 @@ public class CargoWaybillService {
         waybill.setStatus("collected");
         waybill.setCollectedAt(Instant.now());
         waybill.setConsigneeIdVerified(true);
-        return cargoWaybillRepository.save(waybill);
+        CargoWaybill saved = cargoWaybillRepository.save(waybill);
+        publishStatusChanged(saved);
+        return saved;
     }
 
     /**
@@ -282,6 +307,7 @@ public class CargoWaybillService {
 
         waybill.setStatus("cancelled");
         cargoWaybillRepository.save(waybill);
+        publishStatusChanged(waybill);
 
         CargoWaybillCancellation cancellation = new CargoWaybillCancellation();
         cancellation.setWaybillId(waybill.getId());

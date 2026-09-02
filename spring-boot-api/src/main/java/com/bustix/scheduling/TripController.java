@@ -416,9 +416,7 @@ public class TripController {
     @DeleteMapping("/api/fleet/trips/{tripId}")
     @PreAuthorize("hasRole('OPERATOR_ADMIN')")
     public Trip cancel(@PathVariable UUID tripId) {
-        Trip trip = findOwnedTrip(tripId);
-        trip.setStatus("cancelled");
-        return tripRepository.save(trip);
+        return tripUpdateService.cancel(tripId, TenantContext.require());
     }
 
     private Trip findOwnedTrip(UUID tripId) {

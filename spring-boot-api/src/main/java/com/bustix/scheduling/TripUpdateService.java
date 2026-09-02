@@ -1,15 +1,20 @@
 package com.bustix.scheduling;
 
+import com.bustix.api.v1.webhook.PartnerEvent;
+import com.bustix.api.v1.webhook.PartnerEvent.PartnerEventTypes;
 import com.bustix.booking.Booking;
 import com.bustix.booking.BookingRepository;
 import com.bustix.notification.Notification;
 import com.bustix.notification.NotificationRepository;
 import com.bustix.operator.OperatorSettingsService;
 import com.bustix.user.AppUserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
@@ -38,18 +43,21 @@ public class TripUpdateService {
     private final AppUserRepository appUserRepository;
     private final NotificationRepository notificationRepository;
     private final OperatorSettingsService operatorSettingsService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TripUpdateService(
             TripRepository tripRepository,
             BookingRepository bookingRepository,
             AppUserRepository appUserRepository,
             NotificationRepository notificationRepository,
-            OperatorSettingsService operatorSettingsService) {
+            OperatorSettingsService operatorSettingsService,
+            ApplicationEventPublisher eventPublisher) {
         this.tripRepository = tripRepository;
         this.bookingRepository = bookingRepository;
         this.appUserRepository = appUserRepository;
         this.notificationRepository = notificationRepository;
         this.operatorSettingsService = operatorSettingsService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -76,7 +84,38 @@ public class TripUpdateService {
         if (timeChanged && operatorSettingsService.resolve(tenantId).rescheduleNotificationsEnabled()) {
             notifyBookedCustomers(saved.getId());
         }
+        if (timeChanged) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("tripId", saved.getId().toString());
+            data.put("operatorId", tenantId.toString());
+            data.put("departureAt", saved.getDepartureAt().toString());
+            data.put("arrivalAt", saved.getArrivalAt() != null ? saved.getArrivalAt().toString() : null);
+            eventPublisher.publishEvent(new PartnerEvent(PartnerEventTypes.TRIP_RESCHEDULED, tenantId, data));
+        }
         return saved;
+    }
+
+    /**
+     * The write side of {@code DELETE /api/fleet/trips/{id}} - soft-cancels
+     * the trip (status flip only, no cascade) and fires a {@code trip.cancelled}
+     * partner webhook. Split into this {@code @Transactional} bean for the
+     * same reason as {@link #update} - so the flip and the event commit
+     * together.
+     */
+    @Transactional
+    public Trip cancel(UUID tripId, UUID tenantId) {
+        Trip trip = tripRepository.findByIdAndTenantId(tripId, tenantId)
+                .orElseThrow(() -> new NoSuchElementException("Trip not found: " + tripId));
+        if (!"cancelled".equals(trip.getStatus())) {
+            trip.setStatus("cancelled");
+            trip = tripRepository.save(trip);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("tripId", trip.getId().toString());
+            data.put("operatorId", tenantId.toString());
+            data.put("status", "cancelled");
+            eventPublisher.publishEvent(new PartnerEvent(PartnerEventTypes.TRIP_CANCELLED, tenantId, data));
+        }
+        return trip;
     }
 
     private void notifyBookedCustomers(UUID tripId) {

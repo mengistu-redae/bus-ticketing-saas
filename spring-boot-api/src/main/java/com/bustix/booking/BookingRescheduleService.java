@@ -1,5 +1,7 @@
 package com.bustix.booking;
 
+import com.bustix.api.v1.webhook.PartnerEvent;
+import com.bustix.api.v1.webhook.PartnerEvent.PartnerEventTypes;
 import com.bustix.notification.Notification;
 import com.bustix.notification.NotificationRepository;
 import com.bustix.operator.EffectiveOperatorSettings;
@@ -10,6 +12,7 @@ import com.bustix.scheduling.SeatRepository;
 import com.bustix.scheduling.Trip;
 import com.bustix.scheduling.TripRepository;
 import com.bustix.user.AppUserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,7 +20,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -49,6 +54,7 @@ public class BookingRescheduleService {
     private final NotificationRepository notificationRepository;
     private final AppUserRepository appUserRepository;
     private final OperatorSettingsService operatorSettingsService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public BookingRescheduleService(
             BookingRepository bookingRepository,
@@ -60,7 +66,8 @@ public class BookingRescheduleService {
             SeatLockService seatLockService,
             NotificationRepository notificationRepository,
             AppUserRepository appUserRepository,
-            OperatorSettingsService operatorSettingsService) {
+            OperatorSettingsService operatorSettingsService,
+            ApplicationEventPublisher eventPublisher) {
         this.bookingRepository = bookingRepository;
         this.bookingSeatRepository = bookingSeatRepository;
         this.bookingInfantRepository = bookingInfantRepository;
@@ -71,6 +78,7 @@ public class BookingRescheduleService {
         this.notificationRepository = notificationRepository;
         this.appUserRepository = appUserRepository;
         this.operatorSettingsService = operatorSettingsService;
+        this.eventPublisher = eventPublisher;
     }
 
     /** Staff path - tenant-scoped, same shape as CancellationService.cancel. */
@@ -237,6 +245,17 @@ public class BookingRescheduleService {
                     notificationRepository.save(notification);
                 });
             }
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("bookingId", savedBooking.getId().toString());
+            data.put("bookingRef", savedBooking.getBookingRef());
+            data.put("operatorId", savedBooking.getTenantId().toString());
+            data.put("newTripId", newTripId.toString());
+            data.put("newSeatId", newSeatId.toString());
+            data.put("rescheduleFee", fee);
+            data.put("totalAmount", newTotal);
+            eventPublisher.publishEvent(new PartnerEvent(
+                    PartnerEventTypes.BOOKING_RESCHEDULED, savedBooking.getTenantId(), data));
 
             return savedBooking;
         } finally {
