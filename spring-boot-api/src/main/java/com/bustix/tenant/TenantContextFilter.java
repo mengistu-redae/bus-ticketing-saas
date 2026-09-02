@@ -85,6 +85,9 @@ public class TenantContextFilter extends OncePerRequestFilter {
                             writeForbidden(response, "API client access has been revoked");
                             return;
                         }
+                        // Stash it so RateLimitFilter (next in the chain) can
+                        // read the rate tier without a second DB lookup.
+                        request.setAttribute(ApiClient.class.getName(), apiClient);
                         operator = operatorRepository.findById(apiClient.getTenantId()).orElse(null);
                     }
                 }

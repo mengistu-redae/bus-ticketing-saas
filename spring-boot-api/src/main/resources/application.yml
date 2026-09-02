@@ -36,6 +36,26 @@ spring:
 
 # Custom app settings.
 bustix:
+  api:
+    # Per-partner request budgets for the /v1 surface (WS-4). A partner's
+    # tier is api_clients.rate_tier; "default" is the fallback. Buckets are
+    # in-memory (spring-boot-api is single-instance) - keyed by the token's
+    # azp. Set enabled: false to turn the filter off (e.g. load testing).
+    rate-limit:
+      enabled: true
+      tiers:
+        default:
+          capacity: 120
+          refill-tokens: 120
+          refill-period: 1m
+        trusted:
+          capacity: 600
+          refill-tokens: 600
+          refill-period: 1m
+        internal:
+          capacity: 6000
+          refill-tokens: 6000
+          refill-period: 1m
   tenant:
     # Claim in the Keycloak access token that carries the organization id for
     # staff (operator_admin / agent) tokens. VERIFY THIS against a real token

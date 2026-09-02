@@ -1,7 +1,9 @@
 package com.bustix.config;
 
 import com.bustix.api.v1.idempotency.IdempotencyFilter;
+import com.bustix.api.v1.ratelimit.RateLimitFilter;
 import com.bustix.tenant.TenantContextFilter;
+import jakarta.servlet.Filter;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,15 +35,24 @@ import java.util.Map;
 public class SecurityConfig {
 
     /**
-     * IdempotencyFilter is a {@code @Component} so it's constructor-injected,
-     * but it must run ONLY inside the security chain (it needs the
-     * authenticated {@code azp}) - this disables Spring Boot's servlet-level
-     * auto-registration of it, same reason a plain filter bean added via
-     * {@code addFilter*} would otherwise run twice.
+     * {@link RateLimitFilter} and {@link IdempotencyFilter} are
+     * {@code @Component}s (constructor-injected) but must run ONLY inside the
+     * security chain - they need the authenticated {@code azp}. These
+     * registrations disable Spring Boot's servlet-level auto-registration,
+     * which would otherwise run each filter a second time, before security.
      */
     @Bean
+    public FilterRegistrationBean<RateLimitFilter> rateLimitFilterRegistration(RateLimitFilter filter) {
+        return disabledRegistration(filter);
+    }
+
+    @Bean
     public FilterRegistrationBean<IdempotencyFilter> idempotencyFilterRegistration(IdempotencyFilter filter) {
-        FilterRegistrationBean<IdempotencyFilter> registration = new FilterRegistrationBean<>(filter);
+        return disabledRegistration(filter);
+    }
+
+    private static <T extends Filter> FilterRegistrationBean<T> disabledRegistration(T filter) {
+        FilterRegistrationBean<T> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;
     }
@@ -50,6 +61,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(
             HttpSecurity http,
             TenantContextFilter tenantContextFilter,
+            RateLimitFilter rateLimitFilter,
             IdempotencyFilter idempotencyFilter,
             JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
         http
@@ -107,11 +119,13 @@ public class SecurityConfig {
                 .anyRequest().denyAll()
             )
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
-            // TenantContextFilter needs SecurityContext populated first, so
-            // it runs immediately after the bearer-token auth filter;
-            // IdempotencyFilter needs the resolved azp, so it runs after that.
+            // Order after bearer-token auth: TenantContextFilter (resolves
+            // tenant + stashes the ApiClient) -> RateLimitFilter (reads the
+            // tier, throttles) -> IdempotencyFilter (a throttled request must
+            // not consume an idempotency claim).
             .addFilterAfter(tenantContextFilter, BearerTokenAuthenticationFilter.class)
-            .addFilterAfter(idempotencyFilter, TenantContextFilter.class);
+            .addFilterAfter(rateLimitFilter, TenantContextFilter.class)
+            .addFilterAfter(idempotencyFilter, RateLimitFilter.class);
 
         return http.build();
     }

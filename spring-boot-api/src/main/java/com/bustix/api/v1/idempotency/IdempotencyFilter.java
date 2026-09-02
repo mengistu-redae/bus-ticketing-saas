@@ -1,5 +1,6 @@
 package com.bustix.api.v1.idempotency;
 
+import com.bustix.api.v1.ProblemJson;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
@@ -166,18 +167,7 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
     private static void writeProblem(HttpServletResponse response, int status, String code, String detail)
             throws IOException {
-        response.setStatus(status);
-        response.setContentType("application/problem+json");
-        response.setCharacterEncoding("UTF-8");
-        String reason = switch (status) {
-            case 400 -> "Bad Request";
-            case 409 -> "Conflict";
-            case 422 -> "Unprocessable Entity";
-            default -> "Error";
-        };
-        response.getWriter().write(String.format(
-                "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"detail\":\"%s\",\"code\":\"%s\"}",
-                reason, status, detail.replace("\"", "\\\""), code));
+        ProblemJson.write(response, status, code, detail);
     }
 
     /** Re-readable request so the downstream handler still sees the body the filter already consumed. */

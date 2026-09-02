@@ -60,6 +60,14 @@
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
       <version>2.6.0</version>
     </dependency>
+    <!-- Token-bucket rate limiting for the /v1 surface (WS-4). In-memory
+         buckets for now (spring-boot-api is single-instance); the
+         *_jdk17-* line is the current one for Java 17+. -->
+    <dependency>
+      <groupId>com.bucket4j</groupId>
+      <artifactId>bucket4j_jdk17-core</artifactId>
+      <version>8.19.0</version>
+    </dependency>
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
