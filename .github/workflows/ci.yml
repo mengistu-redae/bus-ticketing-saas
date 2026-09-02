@@ -15,6 +15,7 @@ jobs:
   spring-boot-api:
     name: spring-boot-api (mvn verify)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # ubuntu-latest ships a working Docker daemon, so the Testcontainers
     # Postgres + Redis in AbstractIntegrationTest come up for real here -
     # this is the first environment the integration suite actually runs in

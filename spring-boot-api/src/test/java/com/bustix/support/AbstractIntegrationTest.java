@@ -17,19 +17,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
@@ -59,25 +58,45 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
  * stubbed. See NoNetworkJwtDecoderConfig for why the autoconfigured
  * JwtDecoder (which would otherwise try to reach a real issuer at context
  * startup) is replaced.
+ *
+ * The containers use the Testcontainers <b>singleton pattern</b> - started
+ * once in a static initializer and never explicitly stopped (Ryuk reaps
+ * them at JVM exit). This is deliberate: {@code @Testcontainers} +
+ * {@code @Container} stop a static container after each test <i>class</i>,
+ * but the Spring context is cached and shared across classes - so the first
+ * class to finish would kill the container out from under every later
+ * test's cached datasource ("Connection to localhost:xxxxx refused",
+ * 30s Hikari timeout per test). One container for the whole JVM fork keeps
+ * every cached context valid. Wired in via {@code @DynamicPropertySource}
+ * rather than {@code @ServiceConnection} so Spring Boot's own container
+ * lifecycle management never enters the picture either.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureMockMvc
-@Testcontainers
 @ActiveProfiles("test")
 @Import(AbstractIntegrationTest.NoNetworkJwtDecoderConfig.class)
 public abstract class AbstractIntegrationTest {
 
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    @SuppressWarnings("resource") // singleton - lives for the JVM, reaped by Ryuk at exit
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
-    // No dedicated Testcontainers Redis module ships upstream - a plain
-    // GenericContainer plus @ServiceConnection(name = "redis") is the
-    // documented way Spring Boot wires spring.data.redis.host/port from one.
-    @Container
-    @ServiceConnection(name = "redis")
-    static GenericContainer<?> redis =
+    @SuppressWarnings("resource")
+    static final GenericContainer<?> REDIS =
             new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+
+    static {
+        POSTGRES.start();
+        REDIS.start();
+    }
+
+    @DynamicPropertySource
+    static void containerProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("spring.data.redis.host", REDIS::getHost);
+        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+    }
 
     @Autowired
     protected MockMvc mockMvc;
