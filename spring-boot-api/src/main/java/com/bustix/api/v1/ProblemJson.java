@@ -4,6 +4,7 @@ import com.bustix.api.v1.observability.CorrelationIdFilter;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Writes an RFC 9457 {@code application/problem+json} body directly to the
@@ -20,13 +21,17 @@ public final class ProblemJson {
 
     public static void write(HttpServletResponse response, int status, String code, String detail) throws IOException {
         response.setStatus(status);
+        // Bare "application/problem+json" with no ";charset=..." - matches what
+        // V1ExceptionHandler's ProblemDetail responses emit. Writing UTF-8 bytes
+        // straight to the output stream keeps the charset out of the header
+        // (response.getWriter() + setCharacterEncoding would append it).
         response.setContentType("application/problem+json");
-        response.setCharacterEncoding("UTF-8");
         String traceId = CorrelationIdFilter.current();
         String traceField = traceId != null ? ",\"traceId\":\"" + escape(traceId) + "\"" : "";
-        response.getWriter().write(String.format(
+        String body = String.format(
                 "{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d,\"detail\":\"%s\",\"code\":\"%s\"%s}",
-                reasonPhrase(status), status, escape(detail), code, traceField));
+                reasonPhrase(status), status, escape(detail), code, traceField);
+        response.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String escape(String s) {

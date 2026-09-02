@@ -57,8 +57,9 @@ class CancellationIntegrationTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new CancelBookingRequest("change of plans"))))
                 .andExpect(status().isOk())
-                // 48h notice clears the 24h/100% tier.
-                .andExpect(jsonPath("$.refundAmount").value(200.00))
+                // 48h notice clears the 24h/100% tier - full refund of the
+                // tax-inclusive total (200.00 fare + 30.00 VAT), not just the fare.
+                .andExpect(jsonPath("$.refundAmount").value(230.00))
                 .andExpect(jsonPath("$.reason").value("change of plans"));
 
         assertThat(bookingRepository.findById(booking.getId()).orElseThrow().getStatus()).isEqualTo("cancelled");
@@ -158,7 +159,8 @@ class CancellationIntegrationTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new CancelBookingRequest("plans changed"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.refundAmount").value(200.00))
+                // Full refund of the tax-inclusive total (200.00 fare + 30.00 VAT).
+                .andExpect(jsonPath("$.refundAmount").value(230.00))
                 .andExpect(jsonPath("$.reason").value("plans changed"));
 
         assertThat(bookingRepository.findById(booking.getId()).orElseThrow().getStatus()).isEqualTo("cancelled");

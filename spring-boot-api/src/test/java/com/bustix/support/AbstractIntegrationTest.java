@@ -155,7 +155,8 @@ public abstract class AbstractIntegrationTest {
     protected Bus createBus(UUID tenantId, String plateNo, int capacity, String seatLayout) {
         Bus bus = new Bus();
         bus.setTenantId(tenantId);
-        bus.setPlateNo(plateNo);
+        // buses.plate_no is VARCHAR(20); callers commonly pass "PREFIX-" + a full UUID.
+        bus.setPlateNo(plateNo.length() > 20 ? plateNo.substring(0, 20) : plateNo);
         bus.setCapacity(capacity);
         bus.setSeatLayout(seatLayout);
         return busRepository.save(bus);

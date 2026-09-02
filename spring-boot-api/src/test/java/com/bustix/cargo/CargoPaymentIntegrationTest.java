@@ -56,7 +56,8 @@ class CargoPaymentIntegrationTest extends AbstractIntegrationTest {
         CargoWaybill waybill = new CargoWaybill();
         waybill.setTenantId(operator.getId());
         waybill.setTripId(trip.getId());
-        waybill.setWaybillNumber("TEST-" + UUID.randomUUID());
+        // cargo_waybills.waybill_number is VARCHAR(32).
+        waybill.setWaybillNumber("TEST-" + UUID.randomUUID().toString().substring(0, 8));
         waybill.setConsignorName("Consignor");
         waybill.setConsignorPhone("+251911111111");
         waybill.setConsigneeName("Consignee");
