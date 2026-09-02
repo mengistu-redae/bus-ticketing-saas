@@ -1,6 +1,8 @@
 package com.bustix.config;
 
+import com.bustix.api.v1.V1AuthenticationEntryPoint;
 import com.bustix.api.v1.idempotency.IdempotencyFilter;
+import com.bustix.api.v1.observability.PartnerObservabilityFilter;
 import com.bustix.api.v1.ratelimit.RateLimitFilter;
 import com.bustix.tenant.TenantContextFilter;
 import jakarta.servlet.Filter;
@@ -51,6 +53,12 @@ public class SecurityConfig {
         return disabledRegistration(filter);
     }
 
+    @Bean
+    public FilterRegistrationBean<PartnerObservabilityFilter> partnerObservabilityFilterRegistration(
+            PartnerObservabilityFilter filter) {
+        return disabledRegistration(filter);
+    }
+
     private static <T extends Filter> FilterRegistrationBean<T> disabledRegistration(T filter) {
         FilterRegistrationBean<T> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
@@ -63,16 +71,21 @@ public class SecurityConfig {
             TenantContextFilter tenantContextFilter,
             RateLimitFilter rateLimitFilter,
             IdempotencyFilter idempotencyFilter,
+            PartnerObservabilityFilter partnerObservabilityFilter,
+            V1AuthenticationEntryPoint v1AuthenticationEntryPoint,
             JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
         http
             .csrf(csrf -> csrf.disable()) // stateless bearer-token API, called only by the BFF
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers("/actuator/health").permitAll()
-                // OpenAPI spec + Swagger UI for the partner /v1 surface
-                // (springdoc). Publicly readable docs; the API itself still
-                // requires a bearer token. See com.bustix.api.v1.OpenApiConfig.
-                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                // Prometheus scrape endpoint for per-partner API metrics (WS-6).
+                .requestMatchers("/actuator/prometheus").permitAll()
+                // OpenAPI spec + Swagger UI + the Redoc reference page for the
+                // partner /v1 surface. Publicly readable docs; the API itself
+                // still requires a bearer token. See com.bustix.api.v1.OpenApiConfig.
+                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/partner-docs.html")
+                    .permitAll()
                 // Spring's DefaultHandlerExceptionResolver (e.g. for a
                 // @Valid bean-validation failure that no controller-local
                 // @ExceptionHandler catches) writes an error status via
@@ -118,14 +131,19 @@ public class SecurityConfig {
                 .requestMatchers("/v1/**").authenticated()
                 .anyRequest().denyAll()
             )
-            .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
+                // 401s on /v1 come back as problem+json; every other path
+                // keeps the default bearer entry point - see V1AuthenticationEntryPoint.
+                .authenticationEntryPoint(v1AuthenticationEntryPoint))
             // Order after bearer-token auth: TenantContextFilter (resolves
-            // tenant + stashes the ApiClient) -> RateLimitFilter (reads the
-            // tier, throttles) -> IdempotencyFilter (a throttled request must
-            // not consume an idempotency claim).
+            // tenant + stashes the ApiClient) -> RateLimitFilter (tier +
+            // throttle) -> PartnerObservabilityFilter (meter + access log) ->
+            // IdempotencyFilter (a throttled request must not consume a claim).
             .addFilterAfter(tenantContextFilter, BearerTokenAuthenticationFilter.class)
             .addFilterAfter(rateLimitFilter, TenantContextFilter.class)
-            .addFilterAfter(idempotencyFilter, RateLimitFilter.class);
+            .addFilterAfter(partnerObservabilityFilter, RateLimitFilter.class)
+            .addFilterAfter(idempotencyFilter, PartnerObservabilityFilter.class);
 
         return http.build();
     }

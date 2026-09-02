@@ -68,6 +68,12 @@
       <artifactId>bucket4j_jdk17-core</artifactId>
       <version>8.19.0</version>
     </dependency>
+    <!-- Prometheus scrape endpoint for per-partner API metrics (WS-6). -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+      <scope>runtime</scope>
+    </dependency>
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>

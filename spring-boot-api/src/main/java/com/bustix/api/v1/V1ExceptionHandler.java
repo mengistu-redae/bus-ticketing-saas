@@ -153,6 +153,10 @@ public class V1ExceptionHandler {
                 status, detail != null && !detail.isBlank() ? detail : status.getReasonPhrase());
         pd.setTitle(status.getReasonPhrase());
         pd.setProperty("code", code);
+        String traceId = com.bustix.api.v1.observability.CorrelationIdFilter.current();
+        if (traceId != null) {
+            pd.setProperty("traceId", traceId);
+        }
         return pd;
     }
 }

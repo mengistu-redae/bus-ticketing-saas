@@ -1,6 +1,21 @@
 server:
   port: 8081
 
+# Actuator: health for load balancers, prometheus for per-partner API
+# metrics (WS-6). /actuator/prometheus is permitAll'd in SecurityConfig for
+# a scrape agent, same as /actuator/health.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+# Put the request correlation id (CorrelationIdFilter -> MDC "requestId")
+# in every log line, so a partner's X-Request-Id ties their call to our logs.
+logging:
+  pattern:
+    level: "%5p [%X{requestId:-}]"
+
 spring:
   application:
     name: bus-ticketing-api
