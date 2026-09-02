@@ -23,6 +23,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.testcontainers.containers.GenericContainer;
@@ -62,6 +63,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureMockMvc
 @Testcontainers
+@ActiveProfiles("test")
 @Import(AbstractIntegrationTest.NoNetworkJwtDecoderConfig.class)
 public abstract class AbstractIntegrationTest {
 

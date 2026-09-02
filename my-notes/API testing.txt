@@ -1,0 +1,96 @@
+#### API testing
+##
+#
+
+## three ways to test the APIs
+All of them hit http://localhost:8081 directly — the partner API deliberately bypasses nginx/node-bff (it's server-to-server, no browser session).
+
+NB: 
+- Token expiry — 5 minutes. Swagger needs a manual re-Authorize; Postman/curl just re-fetch
+
+
+## First: create a partner credential
+
+Log into the app as demo-platform-admin → Partners tab → fill name + operator, tick the scopes you want (trips:read, bookings:read, bookings:write), Create partner. Copy the client ID and client secret from the banner — the secret is shown once.
+
+---
+
+Option A — Swagger UI (browser, no tools)
+
+1. Open http://localhost:8081/swagger-ui.html
+2. You need a token first. Easiest is curl (see Option C) — or in Postman. Paste it into Swagger's Authorize button (bearerAuth → paste the raw token, no "Bearer " prefix).
+3. Expand any endpoint → Try it out → fill params → Execute.
+
+Token lasts ~5 min; when you get 401 … Jwt expired, get a fresh one and re-Authorize.
+
+
+---
+
+Option B — Postman
+
+One-time setup on the collection (or request) → Authorization tab:
+
+┌───────────────────────┬───────────────────────────────────────────────────────────────────┐
+│         Field         │                               Value                               │
+├───────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ Type                  │ OAuth 2.0                                                         │
+├───────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ Grant Type            │ Client Credentials                                                │
+├───────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ Access Token URL      │ http://localhost:8080/realms/bustix/protocol/openid-connect/token │
+├───────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ Client ID             │ (from the Partners page)                                          │
+├───────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ Client Secret         │ (from the Partners page)                                          │
+├───────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ Scope                 │ trips:read bookings:read bookings:write                           │
+├───────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ Client Authentication │ Send client credentials in body                                   │
+└───────────────────────┴───────────────────────────────────────────────────────────────────┘
+
+Click Get New Token → Use Token. Postman refreshes it automatically when it expires.
+
+Then hit:
+- GET http://localhost:8081/v1/trips?origin=Addis Ababa&destination=Hawassa
+- GET http://localhost:8081/v1/trips/{tripId}/seats
+- POST http://localhost:8081/v1/bookings with body:
+{
+  "tripId": "<from /v1/trips>",
+  "idempotencyKey": "my-test-001",
+  "contactPhone": "+251911234567",
+  "contactEmail": "you@example.com",
+  "passengers": [
+    { "seatId": "<open seat from /seats>", "passengerName": "Test Passenger", "age": 30 }
+  ]
+}
+- POST http://localhost:8081/v1/bookings/{id}/cancel
+- POST http://localhost:8081/v1/bookings/{id}/reschedule → { "newTripId": "...", "newSeatId": "..." }
+
+Import the whole API into Postman from http://localhost:8081/v3/api-docs/partner-v1 (File → Import → Link) — it generates every request with the right shapes.
+
+---
+
+Option C — curl
+
+# 1. get a token
+TOKEN=$(curl -s \
+  -d client_id=<CLIENT_ID> \
+  -d client_secret=<CLIENT_SECRET> \
+  -d grant_type=client_credentials \
+  http://localhost:8080/realms/bustix/protocol/openid-connect/token \
+  | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+# 2. call the API
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8081/v1/trips?origin=Addis%20Ababa&destination=Hawassa" | python -m json.tool
+
+---
+
+Gotchas
+
+- Wrong base URL — http://localhost:3000 or http://localhost (node-bff/nginx) will 404 on /v1. Use :8081.
+- 403 on an endpoint — the token is missing that scope. Re-create the partner with the scope ticked (scopes can't be edited after creation).
+- 403 "operator ... deactivated" / "API client access has been revoked" — the partner or its operator is inactive.
+- You only ever see one operator's data — that's correct; a partner is bound to the operator you picked at creation.
+
+
