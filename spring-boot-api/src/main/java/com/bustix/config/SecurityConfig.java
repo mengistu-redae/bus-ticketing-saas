@@ -15,10 +15,10 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Configuration
 @EnableWebSecurity
@@ -89,8 +89,16 @@ public class SecurityConfig {
     }
 
     /**
-     * Maps Keycloak's realm_access.roles claim to Spring Security authorities
-     * with a ROLE_ prefix, so @PreAuthorize("hasRole('AGENT')") etc. work.
+     * Maps a Keycloak token to Spring Security authorities:
+     * <ul>
+     *   <li>{@code realm_access.roles} → {@code ROLE_*}, so
+     *       {@code @PreAuthorize("hasRole('AGENT')")} etc. work;</li>
+     *   <li>the OAuth {@code scope} claim → {@code SCOPE_*}, so the partner
+     *       {@code /v1} surface can gate on {@code hasAuthority('SCOPE_bookings:write')}.
+     *       Human logins through the BFF request only {@code openid profile
+     *       email}, so this adds nothing for them; client-credentials partner
+     *       tokens carry the granted business scopes.</li>
+     * </ul>
      *
      * NOTE: extractAuthorities is deliberately NOT its own
      * Converter<Jwt, Collection<GrantedAuthority>> @Bean, even though that
@@ -115,13 +123,25 @@ public class SecurityConfig {
 
     @SuppressWarnings("unchecked")
     private Collection<GrantedAuthority> extractAuthorities(Jwt jwt) {
+        List<GrantedAuthority> authorities = new ArrayList<>();
+
         Map<String, Object> realmAccess = jwt.getClaim("realm_access");
-        if (realmAccess == null || realmAccess.get("roles") == null) {
-            return List.of();
+        if (realmAccess != null && realmAccess.get("roles") != null) {
+            for (String role : (List<String>) realmAccess.get("roles")) {
+                authorities.add(new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()));
+            }
         }
-        List<String> roles = (List<String>) realmAccess.get("roles");
-        return roles.stream()
-                .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
-                .collect(Collectors.toList());
+
+        // OAuth scopes are a single space-delimited string per RFC 6749.
+        String scope = jwt.getClaimAsString("scope");
+        if (scope != null && !scope.isBlank()) {
+            for (String s : scope.split(" ")) {
+                if (!s.isBlank()) {
+                    authorities.add(new SimpleGrantedAuthority("SCOPE_" + s));
+                }
+            }
+        }
+
+        return authorities;
     }
 }

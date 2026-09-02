@@ -1,6 +1,7 @@
 package com.bustix.tenant;
 
 import com.bustix.operator.OperatorRepository;
+import com.bustix.partner.ApiClientRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.jwt.Jwt;
 
@@ -21,7 +22,7 @@ import static org.mockito.Mockito.mock;
 class TenantContextFilterTest {
 
     private final TenantContextFilter filter =
-        new TenantContextFilter(mock(OperatorRepository.class), "organization");
+        new TenantContextFilter(mock(OperatorRepository.class), mock(ApiClientRepository.class), "organization");
 
     @Test
     void extractsTheFirstAliasFromTheRealKeycloak26ListShape() {
@@ -77,6 +78,19 @@ class TenantContextFilterTest {
         Jwt jwt = jwtWithClaim("organization", List.of(42));
 
         assertThat(filter.extractOrgId(jwt)).isEmpty();
+    }
+
+    @Test
+    void extractAzpReturnsTheClientIdWhenPresent() {
+        Jwt jwt = jwtWithClaim("azp", "partner-demo-bus-co-k4f9x2");
+
+        assertThat(filter.extractAzp(jwt)).contains("partner-demo-bus-co-k4f9x2");
+    }
+
+    @Test
+    void extractAzpIsEmptyWhenTheClaimIsMissingOrBlank() {
+        assertThat(filter.extractAzp(jwtWithClaim("sub", "x"))).isEmpty();
+        assertThat(filter.extractAzp(jwtWithClaim("azp", "  "))).isEmpty();
     }
 
     private Jwt jwtWithClaim(String name, Object value) {

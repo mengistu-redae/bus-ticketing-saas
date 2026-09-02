@@ -4,8 +4,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -14,16 +12,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Provisions a Keycloak Organization via the Admin REST API - the same two
- * calls infra/keycloak/create-demo-org.sh makes by hand (master-realm
- * admin-cli login via the password grant, then POST .../organizations),
- * just from the app instead of a shell script, for
- * OperatorProvisioningService's "create operator" flow.
+ * Provisions a Keycloak Organization via the Admin REST API - the same call
+ * infra/keycloak/create-demo-org.sh makes by hand (POST .../organizations
+ * after a master-realm admin-cli login), just from the app instead of a
+ * shell script, for OperatorProvisioningService's "create operator" flow.
+ * The admin login itself is {@link KeycloakAdminTokenProvider}.
  *
  * Deliberately a plain RestClient rather than the
  * org.keycloak:keycloak-admin-client library - that library pulls in its
  * own RESTEasy client and Jackson versions that risk classpath conflicts
- * with Spring's own stack, not worth it for two HTTP calls.
+ * with Spring's own stack, not worth it for a handful of HTTP calls.
  */
 @Service
 public class KeycloakOrganizationClient {
@@ -34,16 +32,13 @@ public class KeycloakOrganizationClient {
     private static final String REALM = "bustix";
 
     private final RestClient restClient;
-    private final String adminUsername;
-    private final String adminPassword;
+    private final KeycloakAdminTokenProvider adminTokenProvider;
 
     public KeycloakOrganizationClient(
             @Value("${bustix.keycloak-admin.base-url}") String baseUrl,
-            @Value("${bustix.keycloak-admin.admin-username}") String adminUsername,
-            @Value("${bustix.keycloak-admin.admin-password}") String adminPassword) {
+            KeycloakAdminTokenProvider adminTokenProvider) {
         this.restClient = RestClient.builder().baseUrl(baseUrl).build();
-        this.adminUsername = adminUsername;
-        this.adminPassword = adminPassword;
+        this.adminTokenProvider = adminTokenProvider;
     }
 
     /**
@@ -57,7 +52,7 @@ public class KeycloakOrganizationClient {
      * only useful for logging/diagnostics.
      */
     public String createOrganization(String name, String alias, String domain) {
-        String token = fetchAdminToken();
+        String token = adminTokenProvider.fetchToken();
 
         Map<String, Object> body = Map.of(
                 "name", name,
@@ -86,32 +81,5 @@ public class KeycloakOrganizationClient {
         }
         String path = location.getPath();
         return path.substring(path.lastIndexOf('/') + 1);
-    }
-
-    /** Resource Owner Password Credentials grant against the master realm's built-in admin-cli client. */
-    private String fetchAdminToken() {
-        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-        form.add("client_id", "admin-cli");
-        form.add("username", adminUsername);
-        form.add("password", adminPassword);
-        form.add("grant_type", "password");
-
-        Map<String, Object> tokenResponse;
-        try {
-            tokenResponse = restClient.post()
-                    .uri("/realms/master/protocol/openid-connect/token")
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body(form)
-                    .retrieve()
-                    .body(Map.class);
-        } catch (RestClientException e) {
-            throw new KeycloakAdminException("Could not authenticate as the Keycloak admin", e);
-        }
-
-        Object accessToken = tokenResponse != null ? tokenResponse.get("access_token") : null;
-        if (accessToken == null) {
-            throw new KeycloakAdminException("Keycloak admin login response had no access_token");
-        }
-        return accessToken.toString();
     }
 }

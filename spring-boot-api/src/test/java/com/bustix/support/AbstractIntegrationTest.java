@@ -6,6 +6,8 @@ import com.bustix.fleet.Route;
 import com.bustix.fleet.RouteRepository;
 import com.bustix.operator.Operator;
 import com.bustix.operator.OperatorRepository;
+import com.bustix.partner.ApiClient;
+import com.bustix.partner.ApiClientRepository;
 import com.bustix.scheduling.Seat;
 import com.bustix.scheduling.SeatRepository;
 import com.bustix.scheduling.Trip;
@@ -88,6 +90,9 @@ public abstract class AbstractIntegrationTest {
     protected OperatorRepository operatorRepository;
 
     @Autowired
+    protected ApiClientRepository apiClientRepository;
+
+    @Autowired
     protected BusRepository busRepository;
 
     @Autowired
@@ -108,6 +113,22 @@ public abstract class AbstractIntegrationTest {
         operator.setKeycloakOrgId(keycloakOrgAlias);
         operator.setName(name);
         return operatorRepository.save(operator);
+    }
+
+    /**
+     * A partner API client bound to one operator. The Keycloak side (an
+     * actual confidential client) is not created here - integration tests
+     * that exercise provisioning mock {@code KeycloakPartnerClient}; this
+     * just seeds the local {@code api_clients} row that
+     * {@code TenantContextFilter} resolves a partner token's {@code azp}
+     * against.
+     */
+    protected ApiClient createApiClient(UUID tenantId, String keycloakClientId) {
+        ApiClient apiClient = new ApiClient();
+        apiClient.setKeycloakClientId(keycloakClientId);
+        apiClient.setTenantId(tenantId);
+        apiClient.setName(keycloakClientId);
+        return apiClientRepository.save(apiClient);
     }
 
     protected Bus createBus(UUID tenantId, String plateNo, int capacity, String seatLayout) {
@@ -161,6 +182,28 @@ public abstract class AbstractIntegrationTest {
 
     protected RequestPostProcessor asPlatformAdmin(String subject) {
         return jwtRequest(subject, "platform_admin", null);
+    }
+
+    /**
+     * A third-party partner integration: a Keycloak service-account token
+     * from the client-credentials grant. Carries the {@code agent} realm
+     * role and an {@code azp} claim (the client id) but NO organization
+     * claim - TenantContextFilter resolves its tenant from {@code azp}
+     * against {@code api_clients}. Seed the matching row with
+     * {@link #createApiClient}.
+     */
+    protected RequestPostProcessor asPartner(String keycloakClientId) {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .subject("service-account-" + keycloakClientId)
+                .claim("realm_access", Map.of("roles", List.of("agent")))
+                .claim("azp", keycloakClientId)
+                .claim("scope", "trips:read bookings:read bookings:write")
+                .claim("organization", List.of())
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(300))
+                .build();
+        return jwt().jwt(jwt).authorities(jwtAuthenticationConverter.convert(jwt).getAuthorities());
     }
 
     private RequestPostProcessor jwtRequest(String subject, String realmRole, String orgAlias) {
