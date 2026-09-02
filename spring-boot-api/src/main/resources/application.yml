@@ -56,6 +56,16 @@ bustix:
           capacity: 6000
           refill-tokens: 6000
           refill-period: 1m
+    # Outbound webhooks (WS-5) - the WebhookDispatcher outbox poller.
+    webhooks:
+      poll-interval-ms: 10000
+      max-attempts: 8
+      connect-timeout: 3s
+      read-timeout: 5s
+      # SSRF guard: a production deployment leaves this false so a partner
+      # can't register a callback URL that resolves to an internal address.
+      # true for local dev so a webhook can point at a listener on this box.
+      allow-private-urls: ${WEBHOOKS_ALLOW_PRIVATE_URLS:true}
   tenant:
     # Claim in the Keycloak access token that carries the organization id for
     # staff (operator_admin / agent) tokens. VERIFY THIS against a real token

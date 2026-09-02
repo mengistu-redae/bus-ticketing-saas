@@ -1,5 +1,7 @@
 package com.bustix.booking;
 
+import com.bustix.api.v1.webhook.PartnerEvent;
+import com.bustix.api.v1.webhook.PartnerEvent.PartnerEventTypes;
 import com.bustix.booking.CreateBookingRequest.PassengerSeat;
 import com.bustix.notification.Notification;
 import com.bustix.notification.NotificationRepository;
@@ -9,6 +11,7 @@ import com.bustix.operator.OperatorSettingsService;
 import com.bustix.scheduling.Seat;
 import com.bustix.scheduling.SeatRepository;
 import com.bustix.scheduling.Trip;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +35,7 @@ public class BookingWriter {
     private final OperatorRepository operatorRepository;
     private final OperatorSettingsService operatorSettingsService;
     private final TicketNumberGenerator ticketNumberGenerator;
+    private final ApplicationEventPublisher eventPublisher;
 
     public BookingWriter(
             SeatRepository seatRepository,
@@ -41,7 +45,8 @@ public class BookingWriter {
             NotificationRepository notificationRepository,
             OperatorRepository operatorRepository,
             OperatorSettingsService operatorSettingsService,
-            TicketNumberGenerator ticketNumberGenerator) {
+            TicketNumberGenerator ticketNumberGenerator,
+            ApplicationEventPublisher eventPublisher) {
         this.seatRepository = seatRepository;
         this.bookingRepository = bookingRepository;
         this.bookingSeatRepository = bookingSeatRepository;
@@ -50,6 +55,7 @@ public class BookingWriter {
         this.operatorRepository = operatorRepository;
         this.operatorSettingsService = operatorSettingsService;
         this.ticketNumberGenerator = ticketNumberGenerator;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -156,6 +162,24 @@ public class BookingWriter {
             notificationRepository.save(notification);
         }
 
+        // Partner webhook - delivered only after this transaction commits (see
+        // WebhookEventListener); a no-op when the operator has no endpoints.
+        eventPublisher.publishEvent(new PartnerEvent(
+                PartnerEventTypes.BOOKING_CONFIRMED, booking.getTenantId(), bookingEventData(booking)));
+
         return booking;
+    }
+
+    static Map<String, Object> bookingEventData(Booking booking) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("bookingId", booking.getId().toString());
+        data.put("bookingRef", booking.getBookingRef());
+        data.put("ticketNumber", booking.getTicketNumber());
+        data.put("tripId", booking.getTripId().toString());
+        data.put("operatorId", booking.getTenantId().toString());
+        data.put("channel", booking.getChannel());
+        data.put("status", booking.getStatus());
+        data.put("totalAmount", booking.getTotalAmount());
+        return data;
     }
 }

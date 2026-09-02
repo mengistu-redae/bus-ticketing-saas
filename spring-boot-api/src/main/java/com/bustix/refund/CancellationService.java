@@ -1,5 +1,7 @@
 package com.bustix.refund;
 
+import com.bustix.api.v1.webhook.PartnerEvent;
+import com.bustix.api.v1.webhook.PartnerEvent.PartnerEventTypes;
 import com.bustix.booking.Booking;
 import com.bustix.booking.BookingRepository;
 import com.bustix.booking.BookingSeat;
@@ -11,10 +13,13 @@ import com.bustix.scheduling.SeatRepository;
 import com.bustix.scheduling.Trip;
 import com.bustix.scheduling.TripRepository;
 import com.bustix.user.AppUserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -36,6 +41,7 @@ public class CancellationService {
     private final NotificationRepository notificationRepository;
     private final AppUserRepository appUserRepository;
     private final RefundCalculator refundCalculator;
+    private final ApplicationEventPublisher eventPublisher;
 
     public CancellationService(
             BookingRepository bookingRepository,
@@ -45,7 +51,8 @@ public class CancellationService {
             CancellationRepository cancellationRepository,
             NotificationRepository notificationRepository,
             AppUserRepository appUserRepository,
-            RefundCalculator refundCalculator) {
+            RefundCalculator refundCalculator,
+            ApplicationEventPublisher eventPublisher) {
         this.bookingRepository = bookingRepository;
         this.tripRepository = tripRepository;
         this.seatRepository = seatRepository;
@@ -54,6 +61,7 @@ public class CancellationService {
         this.notificationRepository = notificationRepository;
         this.appUserRepository = appUserRepository;
         this.refundCalculator = refundCalculator;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -142,6 +150,16 @@ public class CancellationService {
                 notificationRepository.save(notification);
             });
         }
+
+        // Partner webhook - delivered after commit (see WebhookEventListener).
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("bookingId", booking.getId().toString());
+        data.put("bookingRef", booking.getBookingRef());
+        data.put("operatorId", booking.getTenantId().toString());
+        data.put("status", "cancelled");
+        data.put("refundAmount", refundAmount);
+        eventPublisher.publishEvent(new PartnerEvent(
+                PartnerEventTypes.BOOKING_CANCELLED, booking.getTenantId(), data));
 
         return cancellation;
     }

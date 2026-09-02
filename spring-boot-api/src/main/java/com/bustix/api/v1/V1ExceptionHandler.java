@@ -112,6 +112,12 @@ public class V1ExceptionHandler {
                 "The request body could not be read as JSON.");
     }
 
+    /** A rejected argument the controller checked itself, e.g. an unacceptable webhook URL. */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ProblemDetail handleIllegalArgument(IllegalArgumentException e) {
+        return problem(HttpStatus.BAD_REQUEST, "invalid-request", e.getMessage());
+    }
+
     @ExceptionHandler({MissingServletRequestParameterException.class, MethodArgumentTypeMismatchException.class})
     public ProblemDetail handleBadParam(Exception e) {
         return problem(HttpStatus.BAD_REQUEST, "invalid-parameter", e.getMessage());
