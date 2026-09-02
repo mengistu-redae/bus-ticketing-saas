@@ -42,14 +42,15 @@ public class PartnerProvisioningService {
         Operator operator = operatorRepository.findById(operatorId)
                 .orElseThrow(() -> new NoSuchElementException("Operator not found: " + operatorId));
 
+        List<String> grantedScopes = PartnerScopes.validate(scopes);
         String clientId = generateClientId(operator.getKeycloakOrgId());
-        String secret = keycloakPartnerClient.createConfidentialClient(clientId, name);
+        String secret = keycloakPartnerClient.createConfidentialClient(clientId, name, grantedScopes);
 
         ApiClient apiClient = new ApiClient();
         apiClient.setKeycloakClientId(clientId);
         apiClient.setTenantId(operator.getId());
         apiClient.setName(name);
-        apiClient.setScopes(scopes == null ? "" : String.join(" ", scopes));
+        apiClient.setScopes(String.join(" ", grantedScopes));
         apiClient.setRateTier(rateTier == null || rateTier.isBlank() ? "default" : rateTier);
         apiClientRepository.save(apiClient);
 

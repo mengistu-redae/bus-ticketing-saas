@@ -40,6 +40,10 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers("/actuator/health").permitAll()
+                // OpenAPI spec + Swagger UI for the partner /v1 surface
+                // (springdoc). Publicly readable docs; the API itself still
+                // requires a bearer token. See com.bustix.api.v1.OpenApiConfig.
+                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 // Spring's DefaultHandlerExceptionResolver (e.g. for a
                 // @Valid bean-validation failure that no controller-local
                 // @ExceptionHandler catches) writes an error status via
@@ -78,6 +82,11 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/bookings/guest").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/bookings/guest/track/*").permitAll()
                 .requestMatchers("/api/**").authenticated()
+                // Partner-facing versioned surface - bearer token required,
+                // per-endpoint scope enforced by @PreAuthorize. Listed
+                // explicitly since anyRequest() below is denyAll(), not
+                // authenticated().
+                .requestMatchers("/v1/**").authenticated()
                 .anyRequest().denyAll()
             )
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))

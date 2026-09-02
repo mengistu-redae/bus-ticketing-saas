@@ -52,6 +52,14 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
+    <!-- Generates the OpenAPI spec + Swagger UI for the partner-facing /v1
+         surface (see the Partner API Build Plan, WS-2). 2.6.x is the line
+         that targets Spring Boot 3.3 / Spring Framework 6.1. -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>2.6.0</version>
+    </dependency>
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>

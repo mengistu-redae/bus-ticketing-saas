@@ -90,6 +90,13 @@ public class PartnerController {
         return e.getMessage();
     }
 
+    /** An unknown scope in the create request - see PartnerScopes.validate. */
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public String handleBadRequest(IllegalArgumentException e) {
+        return e.getMessage();
+    }
+
     @ExceptionHandler(KeycloakAdminException.class)
     @ResponseStatus(HttpStatus.BAD_GATEWAY)
     public String handleKeycloakAdminFailure(KeycloakAdminException e) {

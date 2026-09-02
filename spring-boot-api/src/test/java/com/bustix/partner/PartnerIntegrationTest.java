@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -97,7 +98,8 @@ class PartnerIntegrationTest extends AbstractIntegrationTest {
     @Test
     void createPartnerProvisionsAKeycloakClientAndPersistsTheBinding() throws Exception {
         Operator operator = createOperator("partner-create-" + UUID.randomUUID(), "Create Co");
-        when(keycloakPartnerClient.createConfidentialClient(anyString(), anyString())).thenReturn("s3cr3t-value");
+        when(keycloakPartnerClient.createConfidentialClient(anyString(), anyString(), anyList()))
+                .thenReturn("s3cr3t-value");
 
         String body = objectMapper.writeValueAsString(Map.of(
                 "name", "Acme Travel",

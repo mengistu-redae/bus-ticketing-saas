@@ -193,12 +193,16 @@ public abstract class AbstractIntegrationTest {
      * {@link #createApiClient}.
      */
     protected RequestPostProcessor asPartner(String keycloakClientId) {
+        return asPartner(keycloakClientId, "trips:read", "bookings:read", "bookings:write");
+    }
+
+    protected RequestPostProcessor asPartner(String keycloakClientId, String... scopes) {
         Jwt jwt = Jwt.withTokenValue("test-token")
                 .header("alg", "none")
                 .subject("service-account-" + keycloakClientId)
                 .claim("realm_access", Map.of("roles", List.of("agent")))
                 .claim("azp", keycloakClientId)
-                .claim("scope", "trips:read bookings:read bookings:write")
+                .claim("scope", String.join(" ", scopes))
                 .claim("organization", List.of())
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(300))

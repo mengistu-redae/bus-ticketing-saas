@@ -45,13 +45,16 @@ public class KeycloakPartnerClient {
 
     /**
      * Creates the client, grants its service account the {@code agent} realm
-     * role, and returns the generated client secret - shown to the platform
+     * role, attaches the granted OAuth scopes as default client scopes (so
+     * every client-credentials token carries them in its {@code scope}
+     * claim), and returns the generated client secret - shown to the platform
      * admin once and never stored by Bustix.
      */
-    public String createConfidentialClient(String clientId, String name) {
+    public String createConfidentialClient(String clientId, String name, List<String> scopes) {
         String token = adminTokenProvider.fetchToken();
         String internalId = createClient(token, clientId, name);
         grantPartnerRole(token, internalId);
+        assignScopes(token, internalId, scopes);
         return readSecret(token, internalId);
     }
 
@@ -147,6 +150,78 @@ public class KeycloakPartnerClient {
             throw new KeycloakAdminException(
                     "Could not grant the '" + PARTNER_ROLE + "' role to the client's service account", e);
         }
+    }
+
+    private void assignScopes(String token, String internalClientId, List<String> scopes) {
+        for (String scope : scopes) {
+            String scopeId = ensureClientScope(token, scope);
+            try {
+                restClient.put()
+                        .uri("/admin/realms/{realm}/clients/{id}/default-client-scopes/{scopeId}",
+                                REALM, internalClientId, scopeId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .retrieve()
+                        .toBodilessEntity();
+            } catch (RestClientException e) {
+                throw new KeycloakAdminException("Could not assign scope '" + scope + "' to the new client", e);
+            }
+        }
+    }
+
+    /** Realm client scope named {@code scope}, created if it doesn't exist yet. Returns its id. */
+    private String ensureClientScope(String token, String scope) {
+        String existingId = findClientScopeId(token, scope);
+        if (existingId != null) {
+            return existingId;
+        }
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("name", scope);
+        body.put("protocol", "openid-connect");
+        body.put("attributes", Map.of(
+                "include.in.token.scope", "true",
+                "display.on.consent.screen", "false"));
+        try {
+            restClient.post()
+                    .uri("/admin/realms/{realm}/client-scopes", REALM)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException e) {
+            throw new KeycloakAdminException("Could not create Keycloak client scope '" + scope + "'", e);
+        }
+
+        // Re-read for the generated id - the create response carries only a
+        // Location header whose path shape for client-scopes isn't guaranteed
+        // across versions.
+        String createdId = findClientScopeId(token, scope);
+        if (createdId == null) {
+            throw new KeycloakAdminException("Created Keycloak client scope '" + scope + "' but could not read it back");
+        }
+        return createdId;
+    }
+
+    private String findClientScopeId(String token, String scope) {
+        List<Map<String, Object>> scopes;
+        try {
+            scopes = restClient.get()
+                    .uri("/admin/realms/{realm}/client-scopes", REALM)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<Map<String, Object>>>() {});
+        } catch (RestClientException e) {
+            throw new KeycloakAdminException("Could not list Keycloak client scopes", e);
+        }
+        if (scopes != null) {
+            for (Map<String, Object> cs : scopes) {
+                if (scope.equals(cs.get("name")) && cs.get("id") != null) {
+                    return cs.get("id").toString();
+                }
+            }
+        }
+        return null;
     }
 
     private String readSecret(String token, String internalClientId) {
