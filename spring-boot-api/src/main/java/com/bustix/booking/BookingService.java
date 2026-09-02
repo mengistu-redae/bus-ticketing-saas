@@ -63,11 +63,12 @@ public class BookingService {
     }
 
     /**
-     * @param channel          "self_service", "counter", or "guest"
-     * @param customerUserId   set for self_service/counter, null for guest
+     * @param channel          "self_service", "counter", "guest", or "partner" (a third-party /v1 integration)
+     * @param customerUserId   set for self_service/counter, null for guest/partner
      * @param agentUserId      set only for channel = "counter"
-     * @param recipientEmail   where to send the confirmation - v1 is email-only; may be null (guest with no email given)
-     * @param guestContactPhone set only for channel = "guest" - see Booking.guestContactPhone
+     * @param agentTenantId    the operator the caller acts for - required and tenant-checked for "counter"/"partner"
+     * @param recipientEmail   where to send the confirmation - v1 is email-only; may be null (guest/partner with no email given)
+     * @param guestContactPhone the no-account booking's contact phone - set for "guest" and "partner", see Booking.guestContactPhone
      */
     public Booking createBooking(
             CreateBookingRequest request,
@@ -81,8 +82,12 @@ public class BookingService {
         Trip trip = tripRepository.findById(request.tripId())
             .orElseThrow(() -> new NoSuchElementException("Trip not found: " + request.tripId()));
 
-        if ("counter".equals(channel) && !trip.getTenantId().equals(agentTenantId)) {
-            throw new TenantMismatchException("Agent's operator does not match this trip's operator");
+        // "counter" (an agent at the desk) and "partner" (a third-party /v1
+        // integration) both act for exactly one operator and may only book
+        // that operator's trips - same tenant check for both.
+        if (("counter".equals(channel) || "partner".equals(channel))
+                && !trip.getTenantId().equals(agentTenantId)) {
+            throw new TenantMismatchException("Caller's operator does not match this trip's operator");
         }
 
         // Booking-time-only enforcement of operator deactivation (see
