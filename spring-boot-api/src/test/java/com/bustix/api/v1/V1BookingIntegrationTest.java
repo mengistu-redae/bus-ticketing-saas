@@ -25,8 +25,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * WS-2b: the partner-facing {@code /v1/bookings} surface - create (channel
- * "partner"), read, cancel, reschedule; tenant-scoped; scope-gated.
+ * WS-2b + WS-3: the partner-facing {@code /v1/bookings} surface - create
+ * (channel "partner"), read, cancel, reschedule; tenant-scoped; scope-gated;
+ * every write requires an {@code Idempotency-Key} header.
  */
 class V1BookingIntegrationTest extends AbstractIntegrationTest {
 
@@ -47,7 +48,6 @@ class V1BookingIntegrationTest extends AbstractIntegrationTest {
     private String createBookingBody(UUID tripId, UUID seatId) throws Exception {
         return objectMapper.writeValueAsString(Map.of(
                 "tripId", tripId.toString(),
-                "idempotencyKey", "idem-" + UUID.randomUUID(),
                 "contactPhone", "+251911234567",
                 "passengers", List.of(Map.of("seatId", seatId.toString(), "passengerName", "Test Passenger"))));
     }
@@ -60,6 +60,7 @@ class V1BookingIntegrationTest extends AbstractIntegrationTest {
         Seat seat = seatRepository.findAllByTripId(trip.getId()).get(0);
 
         String created = mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-acme"))
+                        .header("Idempotency-Key", "k-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON).content(createBookingBody(trip.getId(), seat.getId())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.channel").value("partner"))
@@ -72,7 +73,6 @@ class V1BookingIntegrationTest extends AbstractIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
         UUID bookingId = UUID.fromString(objectMapper.readTree(created).get("id").asText());
 
-        // channel persisted as "partner"
         Booking persisted = bookingRepository.findById(bookingId).orElseThrow();
         assertThat(persisted.getChannel()).isEqualTo("partner");
         assertThat(persisted.getGuestContactPhone()).isEqualTo("+251911234567");
@@ -88,7 +88,8 @@ class V1BookingIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$[0].passengerName").value("Test Passenger"))
                 .andExpect(jsonPath("$[0].seatNo").value(seat.getSeatNo()));
 
-        mockMvc.perform(post("/v1/bookings/{id}/cancel", bookingId).with(asPartner("v1b-acme")))
+        mockMvc.perform(post("/v1/bookings/{id}/cancel", bookingId).with(asPartner("v1b-acme"))
+                        .header("Idempotency-Key", "cancel-" + UUID.randomUUID()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("cancelled"))
                 .andExpect(jsonPath("$.refundAmount").exists());
@@ -98,27 +99,61 @@ class V1BookingIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void idempotencyKeyReturnsTheOriginalBooking() throws Exception {
+    void writeWithoutAnIdempotencyKeyHeaderIs400() throws Exception {
+        Operator operator = createOperator("v1b-nokey-" + UUID.randomUUID(), "NoKey Co");
+        createApiClient(operator.getId(), "v1b-nokey");
+        Trip trip = seedTrip(operator, "Adama", "Asella", 4, "90.00");
+        Seat seat = seatRepository.findAllByTripId(trip.getId()).get(0);
+
+        mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-nokey"))
+                        .contentType(MediaType.APPLICATION_JSON).content(createBookingBody(trip.getId(), seat.getId())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("idempotency-key-required"));
+    }
+
+    @Test
+    void replayingAKeyReturnsTheSameResponseAndDoesNotDoubleBook() throws Exception {
         Operator operator = createOperator("v1b-idem-" + UUID.randomUUID(), "Idem Co");
         createApiClient(operator.getId(), "v1b-idem");
         Trip trip = seedTrip(operator, "Adama", "Dire Dawa", 4, "200.00");
         Seat seat = seatRepository.findAllByTripId(trip.getId()).get(0);
-
-        String body = objectMapper.writeValueAsString(Map.of(
-                "tripId", trip.getId().toString(),
-                "idempotencyKey", "fixed-key-123",
-                "contactPhone", "+251911234567",
-                "passengers", List.of(Map.of("seatId", seat.getId().toString(), "passengerName", "P"))));
+        String body = createBookingBody(trip.getId(), seat.getId());
+        String key = "fixed-key-123";
 
         String first = mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-idem"))
+                        .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String second = mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-idem"))
+                        .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
 
         assertThat(objectMapper.readTree(first).get("id")).isEqualTo(objectMapper.readTree(second).get("id"));
         assertThat(bookingRepository.findAllByTenantId(operator.getId())).hasSize(1);
+    }
+
+    @Test
+    void sameKeyWithADifferentBodyIs422() throws Exception {
+        Operator operator = createOperator("v1b-422-" + UUID.randomUUID(), "422 Co");
+        createApiClient(operator.getId(), "v1b-422");
+        Trip trip = seedTrip(operator, "Bahir Dar", "Gondar", 4, "150.00");
+        var seats = seatRepository.findAllByTripId(trip.getId());
+        String key = "reused-key";
+
+        mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-422"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBookingBody(trip.getId(), seats.get(0).getId())))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-422"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBookingBody(trip.getId(), seats.get(1).getId())))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("idempotency-key-reused"));
     }
 
     @Test
@@ -130,8 +165,10 @@ class V1BookingIntegrationTest extends AbstractIntegrationTest {
         Seat seat = seatRepository.findAllByTripId(otherTrip.getId()).get(0);
 
         mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-mine-acme"))
+                        .header("Idempotency-Key", "x-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON).content(createBookingBody(otherTrip.getId(), seat.getId())))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("tenant-mismatch"));
     }
 
     @Test
@@ -141,16 +178,17 @@ class V1BookingIntegrationTest extends AbstractIntegrationTest {
         Trip trip = seedTrip(operator, "Hawassa", "Shashamane", 4, "80.00");
         Seat seat = seatRepository.findAllByTripId(trip.getId()).get(0);
 
-        // read-only partner: can list, cannot create
         mockMvc.perform(get("/v1/bookings").with(asPartner("v1b-scope", "bookings:read")))
                 .andExpect(status().isOk());
         mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-scope", "bookings:read"))
+                        .header("Idempotency-Key", "x-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON).content(createBookingBody(trip.getId(), seat.getId())))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("insufficient-scope"));
     }
 
     @Test
-    void invalidContactPhoneIs400() throws Exception {
+    void invalidContactPhoneIsAProblemJson400() throws Exception {
         Operator operator = createOperator("v1b-phone-" + UUID.randomUUID(), "Phone Co");
         createApiClient(operator.getId(), "v1b-phone");
         Trip trip = seedTrip(operator, "Mekelle", "Adigrat", 4, "120.00");
@@ -158,12 +196,14 @@ class V1BookingIntegrationTest extends AbstractIntegrationTest {
 
         String body = objectMapper.writeValueAsString(Map.of(
                 "tripId", trip.getId().toString(),
-                "idempotencyKey", "k-" + UUID.randomUUID(),
                 "contactPhone", "0911234567",
                 "passengers", List.of(Map.of("seatId", seat.getId().toString(), "passengerName", "P"))));
 
         mockMvc.perform(post("/v1/bookings").with(asPartner("v1b-phone"))
+                        .header("Idempotency-Key", "x-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("validation-failed"))
+                .andExpect(jsonPath("$.errors[0].field").value("contactPhone"));
     }
 }

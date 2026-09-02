@@ -1,6 +1,8 @@
 package com.bustix.config;
 
+import com.bustix.api.v1.idempotency.IdempotencyFilter;
 import com.bustix.tenant.TenantContextFilter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -30,10 +32,25 @@ import java.util.Map;
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    /**
+     * IdempotencyFilter is a {@code @Component} so it's constructor-injected,
+     * but it must run ONLY inside the security chain (it needs the
+     * authenticated {@code azp}) - this disables Spring Boot's servlet-level
+     * auto-registration of it, same reason a plain filter bean added via
+     * {@code addFilter*} would otherwise run twice.
+     */
+    @Bean
+    public FilterRegistrationBean<IdempotencyFilter> idempotencyFilterRegistration(IdempotencyFilter filter) {
+        FilterRegistrationBean<IdempotencyFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
     @Bean
     public SecurityFilterChain filterChain(
             HttpSecurity http,
             TenantContextFilter tenantContextFilter,
+            IdempotencyFilter idempotencyFilter,
             JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
         http
             .csrf(csrf -> csrf.disable()) // stateless bearer-token API, called only by the BFF
@@ -91,8 +108,10 @@ public class SecurityConfig {
             )
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
             // TenantContextFilter needs SecurityContext populated first, so
-            // it runs immediately after the bearer-token auth filter.
-            .addFilterAfter(tenantContextFilter, BearerTokenAuthenticationFilter.class);
+            // it runs immediately after the bearer-token auth filter;
+            // IdempotencyFilter needs the resolved azp, so it runs after that.
+            .addFilterAfter(tenantContextFilter, BearerTokenAuthenticationFilter.class)
+            .addFilterAfter(idempotencyFilter, TenantContextFilter.class);
 
         return http.build();
     }

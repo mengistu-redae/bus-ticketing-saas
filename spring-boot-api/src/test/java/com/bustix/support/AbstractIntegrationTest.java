@@ -196,6 +196,14 @@ public abstract class AbstractIntegrationTest {
         return asPartner(keycloakClientId, "trips:read", "bookings:read", "bookings:write");
     }
 
+    /** A fresh random {@code Idempotency-Key} header - required on every /v1 write (see IdempotencyFilter). */
+    protected RequestPostProcessor idempotencyKey() {
+        return request -> {
+            request.addHeader("Idempotency-Key", "test-" + UUID.randomUUID());
+            return request;
+        };
+    }
+
     protected RequestPostProcessor asPartner(String keycloakClientId, String... scopes) {
         Jwt jwt = Jwt.withTokenValue("test-token")
                 .header("alg", "none")

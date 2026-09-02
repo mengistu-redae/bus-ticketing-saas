@@ -1,6 +1,5 @@
 package com.bustix.api.v1;
 
-import com.bustix.cargo.BookingTripMismatchException;
 import com.bustix.cargo.CancelWaybillRequest;
 import com.bustix.cargo.CargoWaybill;
 import com.bustix.cargo.CargoWaybillCancellation;
@@ -8,21 +7,13 @@ import com.bustix.cargo.CargoWaybillItemRepository;
 import com.bustix.cargo.CargoWaybillRepository;
 import com.bustix.cargo.CargoWaybillService;
 import com.bustix.cargo.CollectWaybillRequest;
-import com.bustix.cargo.ConsigneeIdentityMismatchException;
 import com.bustix.cargo.CreateWaybillRequest;
-import com.bustix.cargo.InvalidWaybillItemsException;
-import com.bustix.cargo.InvalidWaybillStatusException;
-import com.bustix.cargo.NoCargoRateConfiguredException;
-import com.bustix.cargo.ProhibitedItemException;
 import com.bustix.cargo.UpdateWaybillRequest;
-import com.bustix.cargo.WaybillAlreadyCancelledException;
 import com.bustix.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,7 +21,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Comparator;
@@ -160,30 +150,5 @@ public class V1WaybillController {
         return WaybillV1View.of(waybill, cargoWaybillItemRepository.findAllByWaybillId(waybill.getId()));
     }
 
-    // --- error mapping (consolidated into a /v1 @RestControllerAdvice in WS-3) ---
-
-    @ExceptionHandler(NoSuchElementException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public String handleNotFound(NoSuchElementException e) {
-        return e.getMessage();
-    }
-
-    @ExceptionHandler({
-            ProhibitedItemException.class,
-            NoCargoRateConfiguredException.class,
-            InvalidWaybillItemsException.class,
-            BookingTripMismatchException.class})
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public String handleBadRequest(RuntimeException e) {
-        return e.getMessage();
-    }
-
-    @ExceptionHandler({
-            InvalidWaybillStatusException.class,
-            WaybillAlreadyCancelledException.class,
-            ConsigneeIdentityMismatchException.class})
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public String handleConflict(RuntimeException e) {
-        return e.getMessage();
-    }
+    // Error mapping is centralised in V1ExceptionHandler (problem+json).
 }

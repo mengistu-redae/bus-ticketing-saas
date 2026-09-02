@@ -68,7 +68,8 @@ class V1WaybillIntegrationTest extends AbstractIntegrationTest {
         Trip trip = seedTrip(operator);
 
         // 45kg -> 15kg over 30kg threshold -> 150 surcharge + 200 base + 50 handling = 400 total
-        String created = mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-acme", "waybills:read", "waybills:write"))
+        String created = mockMvc.perform(post("/v1/waybills")
+                        .with(asPartner("v1w-acme", "waybills:read", "waybills:write")).with(idempotencyKey())
                         .contentType(MediaType.APPLICATION_JSON).content(createBody(trip.getId())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("issued"))
@@ -86,24 +87,24 @@ class V1WaybillIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.items[0].id").value(waybillId.toString()));
 
         mockMvc.perform(post("/v1/waybills/{id}/dispatch", waybillId)
-                        .with(asPartner("v1w-acme", "waybills:write")))
+                        .with(asPartner("v1w-acme", "waybills:write")).with(idempotencyKey()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("dispatched"))
                 .andExpect(jsonPath("$.dispatchedAt").isNotEmpty());
 
         mockMvc.perform(post("/v1/waybills/{id}/arrive", waybillId)
-                        .with(asPartner("v1w-acme", "waybills:write")))
+                        .with(asPartner("v1w-acme", "waybills:write")).with(idempotencyKey()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("arrived"));
 
         // wrong ID at collect -> 409
         mockMvc.perform(post("/v1/waybills/{id}/collect", waybillId)
-                        .with(asPartner("v1w-acme", "waybills:write"))
+                        .with(asPartner("v1w-acme", "waybills:write")).with(idempotencyKey())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"presentedIdNumber\":\"WRONG\"}"))
                 .andExpect(status().isConflict());
 
         mockMvc.perform(post("/v1/waybills/{id}/collect", waybillId)
-                        .with(asPartner("v1w-acme", "waybills:write"))
+                        .with(asPartner("v1w-acme", "waybills:write")).with(idempotencyKey())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"presentedIdNumber\":\"ID-9\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("collected"));
@@ -115,7 +116,7 @@ class V1WaybillIntegrationTest extends AbstractIntegrationTest {
         createApiClient(operator.getId(), "v1w-norate");
         Trip trip = seedTrip(operator);
 
-        mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-norate", "waybills:write"))
+        mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-norate", "waybills:write")).with(idempotencyKey())
                         .contentType(MediaType.APPLICATION_JSON).content(createBody(trip.getId())))
                 .andExpect(status().isBadRequest());
     }
@@ -136,7 +137,7 @@ class V1WaybillIntegrationTest extends AbstractIntegrationTest {
                 }
                 """.formatted(trip.getId());
 
-        mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-prohib", "waybills:write"))
+        mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-prohib", "waybills:write")).with(idempotencyKey())
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest());
     }
@@ -148,13 +149,13 @@ class V1WaybillIntegrationTest extends AbstractIntegrationTest {
         seedRate(operator.getId());
         Trip trip = seedTrip(operator);
 
-        String created = mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-cancel", "waybills:write"))
+        String created = mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-cancel", "waybills:write")).with(idempotencyKey())
                         .contentType(MediaType.APPLICATION_JSON).content(createBody(trip.getId())))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         UUID waybillId = UUID.fromString(objectMapper.readTree(created).get("id").asText());
 
         mockMvc.perform(post("/v1/waybills/{id}/cancel", waybillId)
-                        .with(asPartner("v1w-cancel", "waybills:write")))
+                        .with(asPartner("v1w-cancel", "waybills:write")).with(idempotencyKey()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("cancelled"))
                 .andExpect(jsonPath("$.refundAmount").exists());
@@ -169,7 +170,7 @@ class V1WaybillIntegrationTest extends AbstractIntegrationTest {
 
         mockMvc.perform(get("/v1/waybills").with(asPartner("v1w-scope", "waybills:read")))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-scope", "waybills:read"))
+        mockMvc.perform(post("/v1/waybills").with(asPartner("v1w-scope", "waybills:read")).with(idempotencyKey())
                         .contentType(MediaType.APPLICATION_JSON).content(createBody(trip.getId())))
                 .andExpect(status().isForbidden());
     }

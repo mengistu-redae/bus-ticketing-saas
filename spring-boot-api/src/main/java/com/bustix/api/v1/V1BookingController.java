@@ -4,35 +4,28 @@ import com.bustix.booking.Booking;
 import com.bustix.booking.BookingInfant;
 import com.bustix.booking.BookingInfantRepository;
 import com.bustix.booking.BookingRepository;
+import com.bustix.booking.BookingRescheduleService;
 import com.bustix.booking.BookingSeat;
 import com.bustix.booking.BookingSeatRepository;
 import com.bustix.booking.BookingService;
-import com.bustix.booking.MultiSeatRescheduleNotSupportedException;
 import com.bustix.booking.RescheduleBookingRequest;
-import com.bustix.booking.SeatConflictException;
-import com.bustix.booking.TenantMismatchException;
-import com.bustix.booking.TooLateToRescheduleException;
-import com.bustix.booking.OperatorInactiveException;
-import com.bustix.refund.BookingAlreadyCancelledException;
+import com.bustix.refund.CancelBookingRequest;
 import com.bustix.refund.Cancellation;
 import com.bustix.refund.CancellationService;
-import com.bustix.booking.BookingRescheduleService;
 import com.bustix.scheduling.Seat;
 import com.bustix.scheduling.SeatRepository;
 import com.bustix.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
@@ -114,12 +107,14 @@ public class V1BookingController {
     @PostMapping
     @PreAuthorize("hasAuthority('SCOPE_bookings:write')")
     @Operation(summary = "Create a booking",
-            description = "channel is recorded as \"partner\". Retrying with the same idempotencyKey returns the "
-                    + "original booking rather than double-booking.")
-    public BookingView create(@Valid @RequestBody CreateBookingV1Request request) {
+            description = "channel is recorded as \"partner\". Send an Idempotency-Key header; a retry with the "
+                    + "same key replays the original response.")
+    public BookingView create(
+            @Valid @RequestBody CreateBookingV1Request request,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
         UUID tenantId = TenantContext.require();
         Booking booking = bookingService.createBooking(
-                request.toInternal(), "partner", null, null, tenantId,
+                request.toInternal(idempotencyKey), "partner", null, null, tenantId,
                 request.contactEmail(), request.contactPhone());
         return toView(booking);
     }
@@ -129,7 +124,7 @@ public class V1BookingController {
     @Operation(summary = "Cancel a booking", description = "Frees the seats and computes a refund from the operator's policy.")
     public CancellationV1View cancel(
             @PathVariable UUID bookingId,
-            @RequestBody(required = false) com.bustix.refund.CancelBookingRequest body) {
+            @RequestBody(required = false) CancelBookingRequest body) {
         Booking booking = ownedBooking(bookingId);
         String reason = body != null ? body.reason() : null;
         Cancellation cancellation = cancellationService.cancel(bookingId, TenantContext.require(), null, reason);
@@ -196,28 +191,5 @@ public class V1BookingController {
         }).toList();
     }
 
-    // --- error mapping (consolidated into a /v1 @RestControllerAdvice in WS-3) ---
-
-    @ExceptionHandler(NoSuchElementException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public String handleNotFound(NoSuchElementException e) {
-        return e.getMessage();
-    }
-
-    @ExceptionHandler({
-            SeatConflictException.class,
-            OperatorInactiveException.class,
-            BookingAlreadyCancelledException.class,
-            TooLateToRescheduleException.class,
-            MultiSeatRescheduleNotSupportedException.class})
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public String handleConflict(RuntimeException e) {
-        return e.getMessage();
-    }
-
-    @ExceptionHandler(TenantMismatchException.class)
-    @ResponseStatus(HttpStatus.FORBIDDEN)
-    public String handleTenantMismatch(TenantMismatchException e) {
-        return e.getMessage();
-    }
+    // Error mapping is centralised in V1ExceptionHandler (problem+json).
 }

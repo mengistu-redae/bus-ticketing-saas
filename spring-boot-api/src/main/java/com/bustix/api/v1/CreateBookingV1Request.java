@@ -17,14 +17,14 @@ import java.util.UUID;
  * than a customer id.
  *
  * {@code passengers} reuses the internal {@link CreateBookingRequest.PassengerSeat}
- * shape - a per-seat named passenger with optional phone/ID/age and
- * lap-sitting infants - since that is already a purpose-built request record
- * with its own field validation, not an entity.
+ * shape. There is no {@code idempotencyKey} field: the required
+ * {@code Idempotency-Key} header (enforced for every {@code /v1} write by
+ * {@code IdempotencyFilter}) is the single retry token, and the controller
+ * passes it through to the booking-creation path's own dedupe.
  */
 public record CreateBookingV1Request(
     @NotNull UUID tripId,
     @NotEmpty @Valid List<CreateBookingRequest.PassengerSeat> passengers,
-    @NotNull String idempotencyKey,
     /** E.164 Ethiopian, e.g. +251911234567 - the contact for this booking. */
     @NotBlank
     @Pattern(regexp = "^\\+251[79]\\d{8}$", message = "contactPhone must be E.164 Ethiopian format, e.g. +251911234567")
@@ -32,8 +32,8 @@ public record CreateBookingV1Request(
     /** Optional - only used to send the confirmation email, never stored. */
     String contactEmail
 ) {
-    /** Maps to the internal request shape; the contact fields flow separately. */
-    public CreateBookingRequest toInternal() {
+    /** Maps to the internal request shape; {@code idempotencyKey} comes from the header. */
+    public CreateBookingRequest toInternal(String idempotencyKey) {
         return new CreateBookingRequest(tripId, passengers, idempotencyKey);
     }
 }
