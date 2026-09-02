@@ -29,6 +29,7 @@ import OperatorSettingsLayout from './pages/operator/SettingsLayout.jsx';
 import OperatorSettings from './pages/operator/Settings.jsx';
 import OperatorBranding from './pages/operator/Branding.jsx';
 import PlatformOperators from './pages/platform/Operators.jsx';
+import PlatformPartners from './pages/platform/Partners.jsx';
 import Waybills from './pages/cargo/Waybills.jsx';
 import WaybillDetail from './pages/cargo/WaybillDetail.jsx';
 import OperatorCargoRates from './pages/operator/CargoRates.jsx';
@@ -272,6 +273,14 @@ export default function App() {
           element={
             <RequireRole role="platform_admin">
               <PlatformOperators />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/platform/partners"
+          element={
+            <RequireRole role="platform_admin">
+              <PlatformPartners />
             </RequireRole>
           }
         />

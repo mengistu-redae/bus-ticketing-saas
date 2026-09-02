@@ -99,6 +99,9 @@ export default function AppShell() {
                   <NavLink to="/platform/operators" className={navLinkClass}>
                     Operators
                   </NavLink>
+                  <NavLink to="/platform/partners" className={navLinkClass}>
+                    Partners
+                  </NavLink>
                 </>
               )}
             </nav>

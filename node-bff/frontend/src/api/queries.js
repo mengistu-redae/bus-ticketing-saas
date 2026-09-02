@@ -746,3 +746,30 @@ export function useDeactivateOperator() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['platform', 'operators'] }),
   });
 }
+
+// /api/platform/partners - third-party API integration credentials (Partner
+// API WS-1). POST provisions a real confidential Keycloak client
+// (client-credentials grant, agent role) via KeycloakPartnerClient and
+// returns the client secret ONCE - it is never stored, so the UI must show
+// it immediately. DELETE disables the Keycloak client and flips the row to
+// `revoked` (not a row delete - audit trail).
+
+export function usePlatformPartners() {
+  return useQuery({ queryKey: ['platform', 'partners'], queryFn: () => apiGet('/api/platform/partners') });
+}
+
+export function useCreatePartner() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => apiPost('/api/platform/partners', body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['platform', 'partners'] }),
+  });
+}
+
+export function useRevokePartner() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (partnerId) => apiDelete(`/api/platform/partners/${partnerId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['platform', 'partners'] }),
+  });
+}
